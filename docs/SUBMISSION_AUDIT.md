@@ -91,7 +91,7 @@ b6ccc02574efb301e211d5a0cf15fabe58dab98a5df2352f36ebd64a59722a52  exports/report
 ## Automated verification
 
 - Python engine: **33 passed**
-- TypeScript: **47 passed**
+- TypeScript: **55 passed**
 - TypeScript compiler: passed
 - ESLint: passed
 - Next.js production build: passed
@@ -121,6 +121,6 @@ See `docs/TESTING.md` for commands and exact outputs.
 
 1. Exercise live official CP-SAT generation and uploaded-change repair in a browser and download both outputs.
 2. Perform a short phone/mobile visual pass.
-3. Record the required walkthrough (maximum five minutes) and submit its viewable URL.
+3. Add and submit the already-recorded walkthrough’s viewable URL (maximum five minutes).
 4. Revoke the Vercel token exposed during deployment setup and retain only a newly rotated credential if one remains necessary.
 5. Make no repository or deployment changes after the official submission deadline.

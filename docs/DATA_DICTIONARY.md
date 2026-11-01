@@ -61,10 +61,10 @@ Official pipeline: **`official_runs`**
 | id | serial PK | run number |
 | kind | text | `schedule` (baseline) or `disruption` (repair) |
 | label | text | human label |
-| dataset_id | text | `cit-public-v1` |
+| dataset_id | text | selected organiser dataset ID (`cit-public-v1` by default) |
 | created_by_id | FK users | Admin who ran it |
 | schedule | jsonb | the exact exported schedule.json content |
-| report | jsonb | official validator JSON; repair rows additionally carry a namespaced internal `_workflow` proposal/approval record |
+| report | jsonb | official validator JSON plus internal namespaced `_dataset` snapshot/provenance for uploaded bases and `_workflow` for repairs; both keys are stripped from downloads |
 | created_at | timestamptz | |
 
 `_workflow` is never emitted in downloads: the export route strips it from approved reports and blocks proposed/rejected repair exports. This avoids a production schema migration while keeping the organiser JSON clean.

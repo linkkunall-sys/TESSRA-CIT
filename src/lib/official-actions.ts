@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
@@ -11,15 +12,21 @@ import {
   getSampleDisruption,
   persistExport,
   runOfficialPipeline,
+  type OfficialDataset,
   type OfficialSchedule,
 } from "./official";
+import { validateOfficialDataset } from "./official-dataset";
 import {
+  getOfficialDatasetSnapshot,
   getRepairWorkflow,
   stripRepairWorkflow,
   validateOfficialDisruption,
+  type OfficialDatasetSnapshot,
   type StoredValidatorReport,
 } from "./official-disruption";
 import { fail, ok, type ActionState } from "./utils";
+
+const MAX_DATASET_BYTES = 512 * 1024;
 
 async function latestScheduleRun() {
   const [row] = await db
@@ -31,9 +38,66 @@ async function latestScheduleRun() {
   return row ?? null;
 }
 
-export async function generateOfficialScheduleAction(_prev: ActionState, _fd: FormData): Promise<ActionState> {
+function safeFileName(value: string, fallback: string) {
+  return value.replace(/[^a-zA-Z0-9._ ()-]/g, "_").slice(0, 160) || fallback;
+}
+
+async function datasetFromForm(fd: FormData, userId: number): Promise<
+  | { data: OfficialDataset; snapshot: OfficialDatasetSnapshot | null }
+  | { error: ActionState }
+> {
+  const upload = fd.get("dataset");
+  if (!upload) return { data: await getOfficialDataset(), snapshot: null };
+  if (typeof upload === "string" || typeof upload.text !== "function" || upload.size === 0) {
+    return { error: fail("Choose a non-empty organiser dataset JSON file.", { dataset: "A .json file is required" }) };
+  }
+  if (upload.size > MAX_DATASET_BYTES) {
+    return { error: fail("The dataset file is too large.", { dataset: "Maximum size is 512 KB" }) };
+  }
+
+  let value: unknown;
+  let text: string;
+  try {
+    text = await upload.text();
+    value = JSON.parse(text);
+  } catch {
+    return { error: fail("The uploaded dataset is not valid JSON.", { dataset: "Fix the JSON syntax and retry" }) };
+  }
+  const checked = validateOfficialDataset(value);
+  if (!checked.ok) {
+    const detail = checked.errors.slice(0, 8).join(" ");
+    return { error: fail(`Dataset rejected: ${detail}`, { dataset: checked.errors[0] }) };
+  }
+  const sourceName = safeFileName(upload.name || "uploaded-dataset.json", "uploaded-dataset.json");
+  return {
+    data: checked.data,
+    snapshot: {
+      data: checked.data,
+      sourceName,
+      sha256: createHash("sha256").update(text).digest("hex"),
+      loadedAt: new Date().toISOString(),
+      loadedById: userId,
+    },
+  };
+}
+
+function datasetForRun(report: unknown, fallback: OfficialDataset) {
+  return getOfficialDatasetSnapshot(report)?.data ?? fallback;
+}
+
+function storeReport(report: ReturnType<typeof stripRepairWorkflow>, snapshot: OfficialDatasetSnapshot | null, workflow?: StoredValidatorReport["_workflow"]): StoredValidatorReport {
+  return {
+    ...report,
+    ...(workflow ? { _workflow: workflow } : {}),
+    ...(snapshot ? { _dataset: snapshot } : {}),
+  };
+}
+
+export async function generateOfficialScheduleAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireRole("admin");
-  const data = await getOfficialDataset();
+  const input = await datasetFromForm(fd, user.id);
+  if ("error" in input) return input.error;
+  const { data, snapshot } = input;
   let result: Awaited<ReturnType<typeof runOfficialPipeline>>;
   try {
     result = await runOfficialPipeline({ data, timeLimit: 90 });
@@ -47,30 +111,35 @@ export async function generateOfficialScheduleAction(_prev: ActionState, _fd: Fo
   }
   await persistExport("schedule.json", schedule);
   await persistExport("report.json", report);
+  const storedReport = storeReport(report, snapshot);
   const count = (await db.select({ id: officialRuns.id }).from(officialRuns)).length;
   const [run] = await db
     .insert(officialRuns)
     .values({
       kind: "schedule",
-      label: `Official run ${count + 1}`,
+      label: snapshot ? `Dataset ${data.dataset_id} · ${snapshot.sourceName}` : `Official run ${count + 1}`,
       datasetId: data.dataset_id,
       createdById: user.id,
       schedule: schedule as unknown as Record<string, unknown>,
-      report: report as unknown as Record<string, unknown>,
+      report: storedReport as unknown as Record<string, unknown>,
     })
     .returning();
-  await audit(user.id, "official.generated", "schedule", run.id,
-    `Official CIT schedule generated (${schedule.solver?.status}) — validator: ${report.hard_violation_count} hard violations, soft ${report.soft_total}, bookings ${report.bookings?.booking_score ?? 0}/${report.bookings?.booking_score_max_if_all_approved ?? 0}`);
+  await audit(
+    user.id,
+    snapshot ? "official.dataset_loaded" : "official.generated",
+    "schedule",
+    run.id,
+    `${snapshot ? `Loaded ${snapshot.sourceName} (${snapshot.sha256.slice(0, 12)}) and generated` : "Generated"} ${data.dataset_id} (${schedule.solver?.status}) — validator: ${report.hard_violation_count} hard violations, soft ${report.soft_total}, bookings ${report.bookings?.booking_score ?? 0}/${report.bookings?.booking_score_max_if_all_approved ?? 0}`,
+  );
   revalidatePath("/admin/official");
   return ok(
     report.hard_violation_count === 0
-      ? `Schedule generated and independently validated: 0 hard violations, soft penalty ${report.soft_total}.`
+      ? `${snapshot ? `Dataset ${data.dataset_id} loaded, versioned and ` : ""}independently validated: 0 hard violations, soft penalty ${report.soft_total}.`
       : `Schedule generated but the official validator reports ${report.hard_violation_count} hard violations — review before using it.`,
   );
 }
 
-async function disruptionFromForm(fd: FormData) {
-  const data = await getOfficialDataset();
+async function disruptionFromForm(fd: FormData, data: OfficialDataset) {
   let value: unknown;
   let sourceName: string;
   if (fd.get("useSample") === "true") {
@@ -107,9 +176,12 @@ export async function proposeOfficialRepairAction(_prev: ActionState, fd: FormDa
   const baselineReport = stripRepairWorkflow(baselineRun.report);
   if (baselineReport.hard_violation_count !== 0) return fail("The latest baseline is not hard-valid; generate a valid baseline first.");
 
-  const input = await disruptionFromForm(fd);
+  const canonicalData = await getOfficialDataset();
+  const data = datasetForRun(baselineRun.report, canonicalData);
+  const snapshot = getOfficialDatasetSnapshot(baselineRun.report);
+  const input = await disruptionFromForm(fd, data);
   if ("error" in input) return input.error ?? fail("The change file could not be read.");
-  const { data, disruption, summary, sourceName } = input;
+  const { disruption, summary, sourceName } = input;
   const baseline = baselineRun.schedule as unknown as OfficialSchedule;
   let result: Awaited<ReturnType<typeof runOfficialPipeline>>;
   try {
@@ -137,10 +209,10 @@ export async function proposeOfficialRepairAction(_prev: ActionState, fd: FormDa
     baselineRunId: baselineRun.id,
     disruption,
     summary,
-    sourceName: sourceName.replace(/[^a-zA-Z0-9._ ()-]/g, "_").slice(0, 160) || "uploaded-change.json",
+    sourceName: safeFileName(sourceName, "uploaded-change.json"),
     proposedAt: new Date().toISOString(),
   };
-  const storedReport: StoredValidatorReport = { ...report, _workflow: workflow };
+  const storedReport = storeReport(report, snapshot, workflow);
   const count = (await db.select({ id: officialRuns.id }).from(officialRuns)).length;
   const [run] = await db
     .insert(officialRuns)
@@ -187,7 +259,7 @@ export async function approveOfficialRepairAction(_prev: ActionState, fd: FormDa
   }
 
   const approvedWorkflow = { ...workflow, status: "approved" as const, approvedAt: new Date().toISOString(), approvedById: user.id };
-  const storedReport: StoredValidatorReport = { ...report, _workflow: approvedWorkflow };
+  const storedReport = storeReport(report, getOfficialDatasetSnapshot(run.report), approvedWorkflow);
   await db
     .update(officialRuns)
     .set({ label: `Approved repair ${run.id} · ${workflow.sourceName}`, report: storedReport as unknown as Record<string, unknown> })
@@ -215,7 +287,7 @@ export async function rejectOfficialRepairAction(_prev: ActionState, fd: FormDat
   if (!workflow || workflow.status !== "proposed") return fail("This repair is no longer awaiting approval.");
   const report = stripRepairWorkflow(run.report);
   const rejectedWorkflow = { ...workflow, status: "rejected" as const, rejectedAt: new Date().toISOString(), rejectedById: user.id };
-  const storedReport: StoredValidatorReport = { ...report, _workflow: rejectedWorkflow };
+  const storedReport = storeReport(report, getOfficialDatasetSnapshot(run.report), rejectedWorkflow);
   await db
     .update(officialRuns)
     .set({ label: `Rejected repair ${run.id} · ${workflow.sourceName}`, report: storedReport as unknown as Record<string, unknown> })

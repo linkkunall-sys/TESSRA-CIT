@@ -11,7 +11,7 @@ import { db } from "@/db";
 import { officialRuns, type OfficialRunRow } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
 import { approveOfficialRepairAction, generateOfficialScheduleAction, proposeOfficialRepairAction, rejectOfficialRepairAction } from "@/lib/official-actions";
-import { applyOfficialDisruptionForDisplay, getRepairWorkflow, stripRepairWorkflow } from "@/lib/official-disruption";
+import { applyOfficialDisruptionForDisplay, getOfficialDatasetSnapshot, getRepairWorkflow, stripRepairWorkflow } from "@/lib/official-disruption";
 import { effectiveCategory, getOfficialDataset, type OfficialDataset, type OfficialSchedule, type ValidatorReport } from "@/lib/official";
 import { qs, readParams, type SearchParams } from "@/lib/params";
 import { cn, formatRelative, pct } from "@/lib/utils";
@@ -232,9 +232,11 @@ function ReportPanel({ report, schedule }: { report: ValidatorReport; schedule: 
 export default async function OfficialPage({ searchParams }: { searchParams: SearchParams }) {
   await requireRole("admin");
   const get = await readParams(searchParams);
-  const data = await getOfficialDataset();
+  const canonicalData = await getOfficialDataset();
   const runs = await db.select().from(officialRuns).orderBy(desc(officialRuns.id)).limit(20);
   const run: OfficialRunRow | null = runs.find((r) => String(r.id) === get("run")) ?? runs[0] ?? null;
+  const datasetSnapshot = getOfficialDatasetSnapshot(run?.report);
+  const data = datasetSnapshot?.data ?? canonicalData;
   const schedule = run ? (run.schedule as unknown as OfficialSchedule) : null;
   const workflow = getRepairWorkflow(run?.report);
   const report = run ? stripRepairWorkflow(run.report) : null;
@@ -328,7 +330,7 @@ export default async function OfficialPage({ searchParams }: { searchParams: Sea
       <PageHeader
         eyebrow={`Crunch Week · ${data.institute} · ${data.dataset_id}`}
         title="Official Dataset (CIT)"
-        description="The canonical CIT source behind every role workspace: directly editable operational records plus the untouched starter pack, OR-Tools CP-SAT solver, and organisers’ validator for reproducible exports."
+        description="Version organiser-format datasets with OR-Tools CP-SAT and the untouched validator; uploaded versions stay isolated from the canonical CIT operational workspaces."
         actions={generateBtn}
         meta={
           <>
@@ -338,6 +340,32 @@ export default async function OfficialPage({ searchParams }: { searchParams: Sea
           </>
         }
       />
+
+      <Card className="mb-6">
+        <CardHeader
+          icon={FileJson}
+          title="Load and version an organiser dataset"
+          description="Upload the starter-pack JSON shape. TESSRA validates every field and reference, generates a schedule, runs the untouched validator, and stores the exact dataset with that run."
+        />
+        <CardBody>
+          <ActionForm action={generateOfficialScheduleAction} className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end" aria-label="Upload base dataset">
+            <div>
+              <label htmlFor="dataset" className="mb-1.5 block text-xs font-medium text-ink-2">Dataset file (.json)</label>
+              <Input id="dataset" name="dataset" type="file" accept="application/json,.json" required />
+              <FieldError name="dataset" />
+              <p className="mt-1.5 text-xs text-ink-3">Maximum 512 KB · strict schema, unique-ID and cross-reference checks · the operational campus database is not overwritten</p>
+            </div>
+            <SubmitButton icon={<Upload />} pendingLabel="Validating, solving and versioning (up to 2 min)…">
+              Load dataset &amp; generate
+            </SubmitButton>
+          </ActionForm>
+          {datasetSnapshot && run && (
+            <Callout tone="info" className="mt-4" title={`Viewing dataset version #${run.id} · ${data.dataset_id}`}>
+              {datasetSnapshot.sourceName} · SHA-256 {datasetSnapshot.sha256.slice(0, 16)}… · loaded {formatRelative(new Date(datasetSnapshot.loadedAt))}. Repairs from this baseline reuse this exact immutable snapshot.
+            </Callout>
+          )}
+        </CardBody>
+      </Card>
 
       <Card className="mb-6">
         <CardHeader
@@ -439,6 +467,7 @@ export default async function OfficialPage({ searchParams }: { searchParams: Sea
                 <Badge tone={run.kind === "schedule" ? "brand" : workflow?.status === "approved" ? "success" : workflow?.status === "rejected" ? "danger" : "warning"}>
                   {run.kind === "schedule" ? "Baseline schedule" : workflow?.status === "approved" ? "Approved repair" : workflow?.status === "rejected" ? "Rejected repair" : "Repair proposal"}
                 </Badge>
+                <Badge tone="outline">Version #{run.id}</Badge>
                 <span className="font-semibold text-ink">{run.label}</span>
                 <span>· {formatRelative(run.createdAt)}</span>
                 <StatusBadge status={report.hard_violation_count === 0 ? "approved" : "rejected"} />
@@ -643,6 +672,7 @@ export default async function OfficialPage({ searchParams }: { searchParams: Sea
                   <Link href={qs("/admin/official", { run: r.id })} className={cn("flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-[13px] transition-colors hover:bg-subtle", run?.id === r.id && "bg-brand-50/50")}>
                     <span className="flex items-center gap-2">
                       <Badge tone={r.kind === "schedule" ? "brand" : repairState === "approved" ? "success" : repairState === "rejected" ? "danger" : "warning"}>{r.kind === "schedule" ? "schedule" : repairState ?? "repair"}</Badge>
+                      <span className="text-xs font-semibold text-ink-3">v{r.id}</span>
                       <span className="font-medium text-ink">{r.label}</span>
                       <span className="text-xs text-ink-3">{formatRelative(r.createdAt)}</span>
                     </span>

@@ -5,9 +5,10 @@ import { BookingReviewActions, ConflictList } from "@/components/domain";
 import { Avatar, Badge, Button, Card, EmptyState, Input, PageHeader, PriorityBadge, StatCard, StatusBadge, TabLinks, Table, TableWrap, TD, TH, THead, TR } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { buildBookingAnalyzer } from "@/lib/engine";
+import { compareBookingPriority } from "@/lib/booking-policy";
 import { categoryLabel } from "@/lib/constants";
 import { qs, readParams, type SearchParams } from "@/lib/params";
-import { listBookings } from "@/lib/queries";
+import { getBookingPriorityPolicy, listBookings } from "@/lib/queries";
 import { formatDate, plural, relativeDay, todayIso } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Bookings" };
@@ -19,13 +20,19 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
   const get = await readParams(searchParams);
   const status = STATUSES.find((s) => s === get("status")) ?? "all";
   const q = (get("q") ?? "").trim();
-  const [all, analyzer] = await Promise.all([listBookings(), buildBookingAnalyzer()]);
+  const [all, analyzer, priorityPolicy] = await Promise.all([listBookings(), buildBookingAnalyzer(), getBookingPriorityPolicy()]);
+  const policyRank = new Map(priorityPolicy.map((item) => [item.category, item.priorityOrder]));
   const today = todayIso();
   const counts = Object.fromEntries(STATUSES.map((s) => [s, s === "all" ? all.length : all.filter((b) => b.status === s).length])) as Record<(typeof STATUSES)[number], number>;
   const rows = all
     .filter((b) => status === "all" || b.status === status)
     .filter((b) => !q || `${b.title} ${b.orgName} ${b.requesterName} ${b.roomCode}`.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => (a.status === "pending" ? -1 : 0) - (b.status === "pending" ? -1 : 0) || b.date.localeCompare(a.date));
+    .sort((a, b) => {
+      const pendingOrder = (a.status === "pending" ? -1 : 0) - (b.status === "pending" ? -1 : 0);
+      if (pendingOrder) return pendingOrder;
+      if (a.status === "pending" && b.status === "pending") return compareBookingPriority(a, b, priorityPolicy);
+      return b.date.localeCompare(a.date);
+    });
   const pending = all.filter((b) => b.status === "pending");
   const conflicted = pending.filter((b) => analyzer.check(b).some((c) => c.severity === "error")).length;
 
@@ -108,6 +115,7 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
                       </TD>
                       <TD className="align-top">
                         <PriorityBadge priority={b.priority} />
+                        <p className="mt-1 text-[11px] text-ink-3">Policy rank {policyRank.get(b.category) ?? "—"}</p>
                       </TD>
                       <TD className="align-top">
                         <StatusBadge status={b.status} />

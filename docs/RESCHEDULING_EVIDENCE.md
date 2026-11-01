@@ -41,7 +41,7 @@ All eight moves are therefore forced relative to the committed baseline.
 ## Automated checks
 
 - `python3 -m pytest engine/tests -q` → **33 passed**
-- `npm run test:unit` → **47 passed**
+- `npm run test:unit` → **55 passed**
 - `npm run typecheck` → passed
 - `npm run lint` → passed
 - `npm run build` → passed

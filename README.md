@@ -58,12 +58,14 @@ The source archive is preserved at `source/CrunchWeek_StarterPack-1.zip`. The ex
 - Versioned timetable generation, validation, manual edits, pinning, publication, CSV exports, and disruption repair
 - Venue/resource catalogue, live availability checks, maintenance state, accessibility, and booking review
 - Multi-room examination planning and clash/capacity validation
-- Official CIT CP-SAT solve/validate/export workflow
+- Official CIT CP-SAT solve/validate/export workflow, including strict organiser-dataset upload, immutable per-run snapshots, SHA-256 provenance, and snapshot-backed disruption repair
+- Admin-editable operational booking-category ranks with unique-permutation validation and priority-aware approval ordering
 - Account/access management, settings, coursework oversight, and atomic CIT baseline restore
 
 ### Department coordinator
 
 - Department dashboard, timetable, faculty workload, approval queue, bookings, and reports
+- Approve or reject pending bookings for labs owned by the coordinator’s department, with conflict checks, priority enforcement, alternatives, notifications, and audit history
 
 ### Faculty
 
@@ -171,7 +173,7 @@ These adapters are explicit application metadata, not replacements for the canon
 
 ## Known limitations
 
-- The supplied `cit-public-v1` dataset is the deliberately pinned operational baseline. Admins can upload organiser-format change files and restore the baseline, but the UI does not replace the entire base dataset with an arbitrary upload.
+- The supplied `cit-public-v1` dataset remains the deliberately pinned **operational** baseline. In the isolated official workbench, Admins may upload another strict organiser-format base dataset; each accepted upload is solved, validated, and stored as an immutable versioned snapshot without overwriting the operational campus database.
 - Live official generation and minimum-move repair require the deployed Python engine service; committed validator-clean exports remain available for reproducibility.
 - Runtime LLM configuration is optional. Without an API key, English/Hinglish booking intake and faculty assistance use deterministic parsers and the manual forms remain fully available.
 - The current deployment uses Neon PostgreSQL and built-in database-backed demo authentication. Supabase credentials are not required or configured.

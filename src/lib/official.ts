@@ -42,7 +42,7 @@ export type OfficialDataset = {
   courses: { id: string; title?: string; name?: string; department: string; year: number; lecture_hours: number; tutorial_hours: number; lab_blocks: number }[];
   sessions: { id: string; course_id: string; kind: "lecture" | "tutorial" | "lab"; groups: string[]; faculty_id: string; size: number; duration: number; room_types: string[]; needs_accessible: boolean; basket_slot: string | null; fixed_slot: { day: string; start_period: number } | null }[];
   booking_requests: OfficialBookingRequest[];
-  cancellations: { request_id: string; note?: string }[];
+  cancellations: { request_id: string; cancelled_at?: string; by?: string; note?: string }[];
   exams: { id: string; course_ids: string[]; groups: string[]; size: number; duration_hours: number }[];
 };
 
@@ -136,8 +136,8 @@ export async function runEngine(opts: { data: OfficialDataset; disruption?: unkn
 }
 
 /** Runs the untouched official validator and returns its JSON report. */
-export async function runOfficialValidator(opts: { schedule: OfficialSchedule; disruption?: unknown; baseline?: OfficialSchedule }): Promise<ValidatorReport> {
-  const dataFile = DATA_PATH;
+export async function runOfficialValidator(opts: { data?: OfficialDataset; schedule: OfficialSchedule; disruption?: unknown; baseline?: OfficialSchedule }): Promise<ValidatorReport> {
+  const dataFile = opts.data ? await tempJson("tessra-data", opts.data) : DATA_PATH;
   const schedFile = await tempJson("tessra-sched", opts.schedule);
   const reportFile = path.join(os.tmpdir(), `tessra-report-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
   const args = [VALIDATOR_PATH, "--data", dataFile, "--schedule", schedFile, "--json", reportFile, "--quiet"];
@@ -187,7 +187,7 @@ export async function runOfficialPipeline(opts: {
   }
 
   const schedule = await runEngine(opts);
-  const report = await runOfficialValidator({ schedule, disruption: opts.disruption, baseline: opts.baseline });
+  const report = await runOfficialValidator({ data: opts.data, schedule, disruption: opts.disruption, baseline: opts.baseline });
   return { schedule, report };
 }
 

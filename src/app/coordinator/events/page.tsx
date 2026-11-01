@@ -1,19 +1,29 @@
-import { CalendarCheck, CalendarPlus, History, X } from "lucide-react";
+import { CalendarCheck, CalendarPlus, FlaskConical, History, X } from "lucide-react";
 import type { Metadata } from "next";
 import { BookingForm } from "@/components/booking-form";
 import { ConfirmAction, Dialog } from "@/components/client";
-import { BookingCard } from "@/components/domain";
+import { BookingCard, DepartmentLabBookingReviewActions } from "@/components/domain";
 import { Card, EmptyState, PageHeader, SectionTitle } from "@/components/ui";
 import { cancelBookingAction, createBookingAction } from "@/lib/actions";
 import { requireRole } from "@/lib/auth";
-import { getRef, getSettings, listBookings } from "@/lib/queries";
+import { compareBookingPriority } from "@/lib/booking-policy";
+import { buildBookingAnalyzer } from "@/lib/engine";
+import { getBookingPriorityPolicy, getRef, getSettings, listBookings } from "@/lib/queries";
 import { todayIso } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Department Events" };
 
 export default async function CoordinatorEventsPage() {
   const user = await requireRole("coordinator");
-  const [ref, settings, bookings] = await Promise.all([getRef(), getSettings(), user.departmentId ? listBookings({ departmentId: user.departmentId }) : Promise.resolve([])]);
+  const [ref, settings, allBookings, analyzer, priorityPolicy] = await Promise.all([getRef(), getSettings(), listBookings(), buildBookingAnalyzer(), getBookingPriorityPolicy()]);
+  const bookings = user.departmentId ? allBookings.filter((booking) => booking.departmentId === user.departmentId) : [];
+  const sourceLabOwner: Record<string, string> = { lab_cs: "CSE", lab_elec: "ECE", lab_phy: "PH", workshop: "ME", lab_civil: "CE" };
+  const ownedLabIds = new Set(ref.rooms
+    .filter((room) => Boolean(user.departmentId) && room.type === "lab" && (room.departmentId === user.departmentId || (room.sourceType && sourceLabOwner[room.sourceType] === user.departmentName)))
+    .map((room) => room.id));
+  const labApprovals = allBookings
+    .filter((booking) => booking.status === "pending" && ownedLabIds.has(booking.roomId))
+    .sort((a, b) => compareBookingPriority(a, b, priorityPolicy));
   const today = todayIso();
   const upcoming = bookings.filter((b) => b.date >= today && b.status !== "cancelled" && b.status !== "rejected").sort((a, b) => a.date.localeCompare(b.date));
   const past = bookings.filter((b) => !upcoming.includes(b));
@@ -39,7 +49,34 @@ export default async function CoordinatorEventsPage() {
 
   return (
     <>
-      <PageHeader eyebrow={user.departmentName ?? "Department"} title="Department Events" description="Seminars, workshops and guest lectures organised by your department." actions={request} />
+      <PageHeader eyebrow={user.departmentName ?? "Department"} title="Department Events" description="Seminars, workshops, guest lectures and approval of requests for department-owned labs." actions={request} />
+
+      <section aria-labelledby="lab-approvals-heading" className="mb-10">
+        <SectionTitle>
+          <span id="lab-approvals-heading" className="flex items-center gap-2"><FlaskConical className="size-4 text-ink-3" aria-hidden /> Department lab approvals</span>
+        </SectionTitle>
+        {labApprovals.length ? (
+          <div className="grid gap-4 xl:grid-cols-2">
+            {labApprovals.map((booking) => {
+              const alternatives = analyzer.alternatives(booking, { includeLabs: true, limit: ref.rooms.length }).filter((room) => ownedLabIds.has(room.id));
+              return (
+                <BookingCard
+                  key={booking.id}
+                  b={booking}
+                  showRequester
+                  conflicts={analyzer.check(booking)}
+                  actions={<DepartmentLabBookingReviewActions booking={booking} alternatives={alternatives} />}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <Card>
+            <EmptyState icon={FlaskConical} title="No department lab bookings awaiting review" description="Pending requests for labs owned by your department will appear here." compact />
+          </Card>
+        )}
+      </section>
+
       <section aria-labelledby="upcoming-heading">
         <SectionTitle>
           <span id="upcoming-heading">Upcoming</span>

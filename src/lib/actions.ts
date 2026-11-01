@@ -8,6 +8,7 @@ import * as t from "@/db/schema";
 import { respond } from "./assistant";
 import { endSession, requireRole, requireUser } from "./auth";
 import { hashPassword } from "./password";
+import { departmentCanReviewLab, findHigherPriorityContender, normalizeBookingPolicy, validateBookingPolicy, type PolicyBooking } from "./booking-policy";
 import { findAlternatives } from "./scheduler";
 import { restoreCitOperationalData } from "./seed";
 import { BOOKING_CATEGORIES, BOOKING_NEEDS, DAY_SHORT, ROOM_FEATURES, roomSupportsBookingNeed, type ChangeType, type Priority, type RoomStatus, type RoomType, type SessionKind } from "./constants";
@@ -411,6 +412,52 @@ export async function deleteExamAction(_prev: ActionState, fd: FormData): Promis
 }
 
 /* ================================ Bookings ============================ */
+async function loadBookingPolicy() {
+  const categories = BOOKING_CATEGORIES.map((item) => item.value);
+  const stored = await db.select().from(t.bookingPriorities).orderBy(t.bookingPriorities.priorityOrder);
+  return normalizeBookingPolicy(categories, stored);
+}
+
+function policyBooking(row: t.BookingRow): PolicyBooking {
+  return {
+    id: row.id,
+    category: row.category,
+    date: row.date,
+    startTime: row.startTime,
+    endTime: row.endTime,
+    roomId: row.roomId,
+    requesterId: row.requesterId,
+    createdAt: row.createdAt,
+  };
+}
+
+async function higherPriorityPendingBooking(row: t.BookingRow) {
+  const [policy, pending] = await Promise.all([
+    loadBookingPolicy(),
+    db.select().from(t.bookings).where(eq(t.bookings.status, "pending")),
+  ]);
+  return findHigherPriorityContender(policyBooking(row), pending.map(policyBooking), policy);
+}
+
+const SOURCE_LAB_OWNER: Record<string, string> = {
+  lab_cs: "CSE",
+  lab_elec: "ECE",
+  lab_phy: "PH",
+  workshop: "ME",
+  lab_civil: "CE",
+};
+
+async function coordinatorOwnsLab(user: { departmentId: number | null; departmentName: string | null }, room: t.RoomRow) {
+  if (departmentCanReviewLab(user.departmentId, room.type, room.departmentId)) return true;
+  const sourceOwner = room.sourceType ? SOURCE_LAB_OWNER[room.sourceType] : undefined;
+  return departmentCanReviewLab(user.departmentName, room.type, sourceOwner);
+}
+
+async function bookingRequesterHref(requesterId: number) {
+  const [requester] = await db.select({ role: t.users.role }).from(t.users).where(eq(t.users.id, requesterId)).limit(1);
+  return requester?.role === "coordinator" ? "/coordinator/events" : requester?.role === "club" ? "/club/bookings" : null;
+}
+
 export async function createBookingAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireRole("club", "coordinator");
   const [settings] = await db.select().from(t.settings).limit(1);
@@ -467,7 +514,16 @@ export async function createBookingAction(_prev: ActionState, fd: FormData): Pro
       .map((candidate) => ({ id: candidate.id, code: candidate.code, name: candidate.name, capacity: candidate.capacity }));
     return fail(`${room.code} is not available: ${blocking[0].message}.`, { roomId: blocking.map((b) => b.message).join(" · ") }, { suggestions });
   }
-  const autoApprove = user.role === "club" && settings && !settings.clubApprovalRequired;
+  const autoApproveEligible = user.role === "club" && Boolean(settings && !settings.clubApprovalRequired);
+  let autoApprove = autoApproveEligible;
+  if (autoApproveEligible) {
+    const [policy, pending] = await Promise.all([
+      loadBookingPolicy(),
+      db.select().from(t.bookings).where(eq(t.bookings.status, "pending")),
+    ]);
+    const target: PolicyBooking = { id: 0, category, date, startTime, endTime, roomId: room.id, requesterId: user.id, createdAt: new Date() };
+    autoApprove = !findHigherPriorityContender(target, pending.map(policyBooking), policy);
+  }
   const [b] = await db
     .insert(t.bookings)
     .values({
@@ -500,12 +556,14 @@ export async function approveBookingAction(_prev: ActionState, fd: FormData): Pr
   const id = num(fd, "id");
   const [b] = id ? await db.select().from(t.bookings).where(eq(t.bookings.id, id)) : [];
   if (!b || b.status !== "pending") return fail("This request is no longer pending.");
+  const contender = await higherPriorityPendingBooking(b);
+  if (contender) return fail(`Cannot approve out of order — booking #${contender.id} has higher priority for this venue and time.`);
   const analyzer = await buildBookingAnalyzer();
   const blocking = analyzer.check(b).filter((c) => c.severity === "error");
   if (blocking.length) return fail(`Cannot approve — ${blocking[0].message}. Reject with an alternative instead.`);
   await db.update(t.bookings).set({ status: "approved", reviewerId: user.id, reviewedAt: new Date() }).where(eq(t.bookings.id, b.id));
   const room = analyzer.rooms.get(b.roomId);
-  await notify(b.requesterId, `Booking approved: ${b.title}`, `${room?.name ?? "Your venue"} is confirmed for ${b.date}, ${b.startTime}–${b.endTime}.`, "success", "/club/bookings");
+  await notify(b.requesterId, `Booking approved: ${b.title}`, `${room?.name ?? "Your venue"} is confirmed for ${b.date}, ${b.startTime}–${b.endTime}.`, "success", await bookingRequesterHref(b.requesterId));
   await audit(user.id, "booking.approved", "booking", b.id, `Approved booking “${b.title}” in ${room?.code ?? "venue"}`);
   refresh();
   return ok(`Approved “${b.title}”.`);
@@ -524,8 +582,56 @@ export async function rejectBookingAction(_prev: ActionState, fd: FormData): Pro
     .set({ status: "rejected", rejectionReason: reason, suggestedRoomId: suggestedRoomId || null, reviewerId: user.id, reviewedAt: new Date() })
     .where(eq(t.bookings.id, b.id));
   const [alt] = suggestedRoomId ? await db.select().from(t.rooms).where(eq(t.rooms.id, suggestedRoomId)) : [];
-  await notify(b.requesterId, `Booking rejected: ${b.title}`, `${reason}${alt ? ` Suggested alternative: ${alt.code}.` : ""}`, "error", "/club/history");
+  await notify(b.requesterId, `Booking rejected: ${b.title}`, `${reason}${alt ? ` Suggested alternative: ${alt.code}.` : ""}`, "error", await bookingRequesterHref(b.requesterId));
   await audit(user.id, "booking.rejected", "booking", b.id, `Rejected booking “${b.title}”${alt ? ` — suggested ${alt.code}` : ""}`);
+  refresh();
+  return ok(`Rejected “${b.title}”. The requester has been notified.`);
+}
+
+export async function approveDepartmentLabBookingAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireRole("coordinator");
+  const id = num(fd, "id");
+  const [b] = id ? await db.select().from(t.bookings).where(eq(t.bookings.id, id)) : [];
+  if (!b || b.status !== "pending") return fail("This request is no longer pending.");
+  const [room] = await db.select().from(t.rooms).where(eq(t.rooms.id, b.roomId)).limit(1);
+  if (!room || !(await coordinatorOwnsLab(user, room))) return fail("You can only review bookings for labs owned by your department.");
+  const contender = await higherPriorityPendingBooking(b);
+  if (contender) return fail(`Cannot approve out of order — booking #${contender.id} has higher priority for this lab and time.`);
+  const analyzer = await buildBookingAnalyzer();
+  const blocking = analyzer.check(b).filter((conflict) => conflict.severity === "error");
+  if (blocking.length) return fail(`Cannot approve — ${blocking[0].message}. Reject with an alternative instead.`);
+  await db.update(t.bookings).set({ status: "approved", reviewerId: user.id, reviewedAt: new Date() }).where(eq(t.bookings.id, b.id));
+  await notify(b.requesterId, `Lab booking approved: ${b.title}`, `${room.name} is confirmed for ${b.date}, ${b.startTime}–${b.endTime}.`, "success", await bookingRequesterHref(b.requesterId));
+  await audit(user.id, "booking.department_lab_approved", "booking", b.id, `Approved “${b.title}” in department lab ${room.code}`);
+  refresh();
+  return ok(`Approved “${b.title}” in ${room.code}.`);
+}
+
+export async function rejectDepartmentLabBookingAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireRole("coordinator");
+  const id = num(fd, "id");
+  const reason = str(fd, "reason").slice(0, 400);
+  const suggestedRoomId = num(fd, "suggestedRoomId");
+  if (reason.length < 5) return fail("Explain the reason so the requester can act on it.", { reason: "A reason is required" });
+  const [b] = id ? await db.select().from(t.bookings).where(eq(t.bookings.id, id)) : [];
+  if (!b || b.status !== "pending") return fail("This request is no longer pending.");
+  const [room] = await db.select().from(t.rooms).where(eq(t.rooms.id, b.roomId)).limit(1);
+  if (!room || !(await coordinatorOwnsLab(user, room))) return fail("You can only review bookings for labs owned by your department.");
+  const [alternative] = suggestedRoomId ? await db.select().from(t.rooms).where(eq(t.rooms.id, suggestedRoomId)).limit(1) : [];
+  if (suggestedRoomId && !alternative) return fail("The suggested alternative no longer exists.");
+  if (alternative && !(await coordinatorOwnsLab(user, alternative))) return fail("Suggested alternatives must be labs owned by your department.");
+  if (alternative?.id === b.roomId) return fail("Choose a different lab as the suggested alternative.");
+  if (alternative) {
+    const analyzer = await buildBookingAnalyzer();
+    const blocking = analyzer.check(b, alternative.id).filter((conflict) => conflict.severity === "error");
+    if (blocking.length) return fail(`That alternative cannot be suggested — ${blocking[0].message}.`);
+  }
+  await db
+    .update(t.bookings)
+    .set({ status: "rejected", rejectionReason: reason, suggestedRoomId: alternative?.id ?? null, reviewerId: user.id, reviewedAt: new Date() })
+    .where(eq(t.bookings.id, b.id));
+  await notify(b.requesterId, `Lab booking rejected: ${b.title}`, `${reason}${alternative ? ` Suggested alternative: ${alternative.code}.` : ""}`, "error", await bookingRequesterHref(b.requesterId));
+  await audit(user.id, "booking.department_lab_rejected", "booking", b.id, `Rejected “${b.title}” for department lab ${room.code}`);
   refresh();
   return ok(`Rejected “${b.title}”. The requester has been notified.`);
 }
@@ -890,6 +996,29 @@ export async function updateSettingsAction(_prev: ActionState, fd: FormData): Pr
   return ok("Settings saved.");
 }
 
+export async function updateBookingPrioritiesAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireRole("admin");
+  const categories = BOOKING_CATEGORIES.map((item) => item.value);
+  const ranks = Object.fromEntries(categories.map((category) => [category, Number(fd.get(`priority_${category}`))])) as Record<string, number>;
+  const checked = validateBookingPolicy(categories, ranks);
+  if (!checked.ok) return fail(checked.message);
+
+  await db.transaction(async (tx) => {
+    for (const item of checked.policy) {
+      await tx
+        .insert(t.bookingPriorities)
+        .values({ category: item.category, priorityOrder: item.priorityOrder, updatedById: user.id, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: t.bookingPriorities.category,
+          set: { priorityOrder: item.priorityOrder, updatedById: user.id, updatedAt: new Date() },
+        });
+    }
+  });
+  const labels = new Map(BOOKING_CATEGORIES.map((item) => [item.value, item.label]));
+  await audit(user.id, "booking.priority_updated", "settings", 1, `Booking priority: ${checked.policy.map((item) => labels.get(item.category) ?? item.category).join(" > ")}`);
+  refresh();
+  return ok("Booking priority order saved and enforced for future reviews.");
+}
 
 /* ======================= Manual timetable management ====================== */
 function draftRules(draft: { kind: t.SessionKind; duration: number; startPeriod: number }) {

@@ -2,22 +2,23 @@ import { Building, Clock, LogOut, Save, Ticket, UserRound } from "lucide-react";
 import type { Metadata } from "next";
 import { ActionForm, FormField, SubmitButton } from "@/components/client";
 import { ResetDemoDataButton } from "@/components/reset-demo-data";
-import { Avatar, Badge, Button, Card, CardBody, CardHeader, Checkbox, Input, KeyValue, PageHeader, Table, TableWrap, TD, TH, THead, TR } from "@/components/ui";
-import { logoutAction, updateSettingsAction } from "@/lib/actions";
+import { Avatar, Badge, Button, Card, CardBody, CardHeader, Checkbox, Input, KeyValue, PageHeader, Select, Table, TableWrap, TD, TH, THead, TR } from "@/components/ui";
+import { logoutAction, updateBookingPrioritiesAction, updateSettingsAction } from "@/lib/actions";
 import { requireRole } from "@/lib/auth";
 import { LUNCH, PERIODS, ROLE_LABEL } from "@/lib/constants";
-import { getSettings } from "@/lib/queries";
+import { getBookingPriorityPolicy, getSettings } from "@/lib/queries";
 import { formatDateTime } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const user = await requireRole("admin");
-  const settings = await getSettings();
+  const [settings, priorityPolicy] = await Promise.all([getSettings(), getBookingPriorityPolicy()]);
   return (
     <>
       <PageHeader eyebrow="System" title="Settings" description="Institution profile, booking policy and the teaching-period structure used by the scheduling engine." />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-6">
         <Card>
           <CardHeader icon={Building} title="Institution & booking policy" description={`Last updated ${formatDateTime(settings.updatedAt)}`} />
           <ActionForm action={updateSettingsAction} className="space-y-6 p-5">
@@ -53,6 +54,36 @@ export default async function SettingsPage() {
           </ActionForm>
         </Card>
 
+        <Card>
+          <CardHeader
+            icon={Ticket}
+            title="Booking priority order"
+            description="Rank 1 wins when pending requests compete for the same venue and time; equal categories are ordered by submission time."
+          />
+          <ActionForm action={updateBookingPrioritiesAction} className="space-y-4 p-5">
+            <div className="space-y-3">
+              {priorityPolicy.map((item) => (
+                <div key={item.category} className="grid grid-cols-[minmax(0,1fr)_110px] items-center gap-3 rounded-lg border border-line px-3 py-2.5">
+                  <div>
+                    <p className="text-sm font-medium text-ink">{item.label}</p>
+                    <p className="text-xs text-ink-3">{item.category}</p>
+                  </div>
+                  <FormField name={`priority_${item.category}`} label="Rank" className="mb-0">
+                    <Select id={`priority_${item.category}`} name={`priority_${item.category}`} defaultValue={item.priorityOrder}>
+                      {priorityPolicy.map((_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}
+                    </Select>
+                  </FormField>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs leading-5 text-ink-3">Every rank must be unique. The organiser’s official dataset still carries its own canonical scoring order; this policy governs operational booking review.</p>
+            <div className="flex justify-end border-t border-line pt-4">
+              <SubmitButton icon={<Save />} pendingLabel="Saving priority…">Save priority order</SubmitButton>
+            </div>
+          </ActionForm>
+        </Card>
+        </div>
+
         <div className="space-y-6">
           <Card>
             <CardHeader icon={UserRound} title="Your account" />
@@ -78,7 +109,7 @@ export default async function SettingsPage() {
             </CardBody>
           </Card>
           <Card>
-            <CardHeader icon={Clock} title="Teaching periods" description="Monday – Friday · labs run in two-period blocks" />
+            <CardHeader icon={Clock} title="Teaching periods" description="Monday – Friday · labs run in three-period blocks" />
             <TableWrap>
               <Table className="min-w-0">
                 <THead>

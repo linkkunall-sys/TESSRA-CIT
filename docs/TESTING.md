@@ -8,7 +8,7 @@ This document records checks executed against this CIT repository. It does not r
 
 ```bash
 npm run test:unit
-# 47 passed, 0 failed
+# 55 passed, 0 failed
 
 npm run typecheck
 # passed
@@ -16,19 +16,24 @@ npm run typecheck
 npm run lint
 # passed
 
+DATABASE_URL='postgresql://user:pass@localhost:5432/tessra' npm run build
+# production build passed; dummy compile-time URL only, no database connection
+
 npm audit --omit=dev
 # 0 vulnerabilities
 ```
 
-The 47 TypeScript tests cover:
+The 55 TypeScript tests cover:
 
 - 25 English/Hinglish booking-parser and adversarial-input cases;
+- 4 booking-policy tests for unique rank permutations, category/timestamp precedence, overlap, and coordinator lab ownership scope;
 - 3 calendar, lunch, and lab-block rules;
 - 3 CIT operational tests covering the complete source timetable, targeted room eligibility, targeted faculty daily limits, elective-basket synchronization, regeneration, and multi-room half-capacity examinations;
 - 3 placement-explanation tests;
 - 3 LLM boundary/sanitization tests;
-- 3 role-navigation tests; and
-- 7 official disruption/workflow tests.
+- 3 role-navigation tests;
+- 4 strict organiser-dataset tests covering the canonical source, duplicate/broken references, root/nested unknown fields, calendar data, and undeclared booking policy values; and
+- 7 official disruption/snapshot/workflow tests.
 
 ## Python scheduling engine
 

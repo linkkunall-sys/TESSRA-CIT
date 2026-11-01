@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { OfficialDataset } from "./official";
-import { applyOfficialDisruptionForDisplay, getRepairWorkflow, stripRepairWorkflow, validateOfficialDisruption } from "./official-disruption";
+import { applyOfficialDisruptionForDisplay, getOfficialDatasetSnapshot, getRepairWorkflow, stripRepairWorkflow, validateOfficialDisruption } from "./official-disruption";
 
 const root = process.cwd();
 const data = JSON.parse(
@@ -124,7 +124,17 @@ test("workflow metadata is readable internally and stripped from official report
       sourceName: "judge.json",
       proposedAt: "2026-11-01T00:00:00.000Z",
     },
+    _dataset: {
+      data,
+      sourceName: "cit_public.json",
+      sha256: "a".repeat(64),
+      loadedAt: "2026-11-01T00:00:00.000Z",
+      loadedById: 1,
+    },
   };
   assert.equal(getRepairWorkflow(stored)?.status, "proposed");
-  assert.equal("_workflow" in stripRepairWorkflow(stored), false);
+  assert.equal(getOfficialDatasetSnapshot(stored)?.data.dataset_id, data.dataset_id);
+  const stripped = stripRepairWorkflow(stored);
+  assert.equal("_workflow" in stripped, false);
+  assert.equal("_dataset" in stripped, false);
 });

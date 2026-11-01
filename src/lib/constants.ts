@@ -117,11 +117,11 @@ export const DISRUPTION_TYPE_LABEL: Record<DisruptionType, string> = {
 
 export const BOOKING_CATEGORIES: { value: string; label: string }[] = [
   { value: "exam", label: "Examination" },
+  { value: "regular_session", label: "Regular session" },
   { value: "institute_event", label: "Institute event" },
   { value: "guest_lecture", label: "Guest lecture" },
   { value: "department_event", label: "Department event" },
   { value: "club_event", label: "Club event" },
-  { value: "regular_class", label: "Regular class" },
 ];
 
 export function categoryLabel(value: string) {

@@ -3,7 +3,8 @@ import { cache } from "react";
 import { db } from "@/db";
 import * as t from "@/db/schema";
 import type { CurrentUser } from "./auth";
-import type { RequestStatus, Role } from "./constants";
+import { BOOKING_CATEGORIES, type RequestStatus, type Role } from "./constants";
+import { normalizeBookingPolicy } from "./booking-policy";
 import { getPublishedVersion, loadEngineState } from "./engine";
 import { validateExams, validateSessions, type Issue } from "./scheduler";
 
@@ -22,6 +23,14 @@ export const getSettings = cache(async () => {
     }
   );
 });
+
+export async function getBookingPriorityPolicy() {
+  const categories = BOOKING_CATEGORIES.map((item) => item.value);
+  const stored = await db.select().from(t.bookingPriorities).orderBy(t.bookingPriorities.priorityOrder);
+  const normalized = normalizeBookingPolicy(categories, stored);
+  const labels = new Map(BOOKING_CATEGORIES.map((item) => [item.value, item.label]));
+  return normalized.map((item) => ({ ...item, label: labels.get(item.category) ?? item.category }));
+}
 
 export const getPublished = cache(getPublishedVersion);
 
@@ -174,8 +183,18 @@ export type BookingView = t.BookingRow & {
   roomCode: string;
   roomName: string;
   roomCapacity: number;
+  roomType: t.RoomType | null;
+  roomDepartmentId: number | null;
   suggestedRoomCode: string | null;
   reviewerName: string | null;
+};
+
+const SOURCE_LAB_OWNER: Record<string, string> = {
+  lab_cs: "CSE",
+  lab_elec: "ECE",
+  lab_phy: "PH",
+  workshop: "ME",
+  lab_civil: "CE",
 };
 
 export async function listBookings(filter: { requesterId?: number; departmentId?: number; status?: RequestStatus } = {}) {
@@ -194,6 +213,8 @@ export async function listBookings(filter: { requesterId?: number; departmentId?
   return rows.map<BookingView>((b) => {
     const room = ref.roomMap.get(b.roomId);
     const requester = ref.personMap.get(b.requesterId);
+    const inferredDepartmentCode = room?.sourceType ? SOURCE_LAB_OWNER[room.sourceType] : undefined;
+    const inferredDepartmentId = inferredDepartmentCode ? ref.departments.find((department) => department.code === inferredDepartmentCode)?.id ?? null : null;
     return {
       ...b,
       requesterName: b.sourceRequester ?? requester?.name ?? "Unknown",
@@ -206,6 +227,8 @@ export async function listBookings(filter: { requesterId?: number; departmentId?
       roomCode: room?.code ?? "—",
       roomName: room?.name ?? "",
       roomCapacity: room?.capacity ?? 0,
+      roomType: room?.type ?? null,
+      roomDepartmentId: room?.departmentId ?? inferredDepartmentId,
       suggestedRoomCode: b.suggestedRoomId ? ref.roomMap.get(b.suggestedRoomId)?.code ?? null : null,
       reviewerName: b.reviewerId ? ref.personMap.get(b.reviewerId)?.name ?? null : null,
     };

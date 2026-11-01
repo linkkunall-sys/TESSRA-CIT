@@ -22,7 +22,7 @@ Status legend: ✅ implemented/verified · 🟡 partial or final live interactio
 | 6 | Views by group/faculty/room plus approvals, conflicts and utilisation | Role dashboards, timetable switchers, queues, conflict panels and room-utilisation reports | ✅ |
 | 7 | Faculty natural-language assistant with validated alternatives/unavailability explanation | Optional LLM intent layer plus deterministic fallback/search; no model can write or decide validity | ✅ |
 | 8 | Explain decisions | Placement rationale, verified facts/alternatives, booking reasons and S1–S6 report | ✅ |
-| 9 | Admin loads dataset/change files and exports organiser JSON | Change-file upload and validated exports work; supplied base is pinned rather than replaceable through an arbitrary dataset-upload UI | 🟡 |
+| 9 | Admin loads dataset/change files and exports organiser JSON | Strict base-dataset upload validates nested schema/IDs/references, stores an immutable hashed version, passes that snapshot to CP-SAT and the untouched validator, reuses it for repair, and exports clean organiser JSON | ✅ |
 | 10 | Authorized manual event scheduling with hard constraints | Role guards, event-enabled-room checks, feature/capacity/time/conflict checks and approval workflow | ✅ |
 
 ## Scheduling constraints (§3)
@@ -60,12 +60,12 @@ All six soft constraints S1–S6 use the organiser weights. No hard-constraint i
 | Four roles and protected workspaces | ✅ | Admin, coordinator, faculty and club accounts all passed live authentication checks |
 | Admin generation and timetable-change approval | ✅ | Draft/publish and proposal/approval boundaries are server-side |
 | Admin review of bookings that can affect classes | ✅ | Official allocator/validator handles Week 7 decisions and overrides |
-| Admin can change priority order | ❌ | Schema exists, but no working Admin editor is exposed and the official source order remains canonical |
+| Admin can change priority order | ✅ | Settings exposes complete unique operational category ranks; competing approval and auto-approval paths enforce category rank then submission time. Official exports retain the selected dataset’s canonical order. |
 | Coordinator requests department changes and books events | ✅ | Department-scoped change queue and event request flow |
-| Coordinator approves bookings of department labs | 🟡 | Department scope exists, but a dedicated lab-booking approval action is not exposed |
+| Coordinator approves bookings of department labs | ✅ | Coordinator queue and server actions are restricted to labs owned by that department, with conflict/priority checks, alternatives, notifications and audit entries |
 | Faculty timetable, availability, moved/extra-session requests | ✅ | All present with deterministic validation |
 | Club submit/cancel/status/reason | ✅ | All present |
-| Nobody approves their own request | 🟡 | Normal routes separate requester/reviewer roles; add an explicit reviewer-ID inequality guard for defense in depth |
+| Nobody approves their own request | 🟡 | Existing requester/reviewer role separation is unchanged; the product owner explicitly declined an additional reviewer-ID inequality rule so login and current flows remain as-is |
 | Fixed priority, role caps and timestamp tie-break in official run | ✅ | 0 organiser-reported priority inversions |
 
 ## Implementation rules (§6)
@@ -96,7 +96,7 @@ All six soft constraints S1–S6 use the organiser weights. No hard-constraint i
 | Live deployed link | ✅ `https://tessra-cit.vercel.app` |
 | Four working deployed demo accounts | ✅ production-authenticated route smoke passed |
 | Admin reset-demo-data button | ✅ dashboard and settings |
-| Maximum-five-minute walkthrough video | ❌ submission-owner action |
+| Maximum-five-minute walkthrough video | 🟡 recorded; public URL will be linked later |
 
 ## Live verification completed
 
@@ -107,18 +107,15 @@ All six soft constraints S1–S6 use the organiser weights. No hard-constraint i
 
 ## Highest-value remaining work
 
-### Required before submission
+### Required before final handoff
 
-1. Record and submit the up-to-five-minute walkthrough showing generation, plain-language booking, blocked conflict, Spectra decisions, repair diff/approval and dashboard.
-2. Run one live official generation and one uploaded-change repair interaction; download and independently validate both outputs.
-3. Check the main flows once at a phone viewport.
-4. Revoke the Vercel token exposed in chat and do not commit or deploy after the official deadline.
+1. Insert the already-recorded walkthrough’s public URL in the README/submission record.
+2. After deployment, exercise one strict base-dataset upload, one snapshot-backed repair, one priority-policy update, and one coordinator lab decision without changing the database outside normal application actions.
+3. Check the new settings/upload/lab-review controls once at a phone viewport.
+4. Revoke every deployment token exposed in chat; none may be reused.
 
-### Product compliance improvements, if time remains
+### Deliberate scope boundary
 
-1. Add the missing Admin priority-order editor and make operational booking queues honor it.
-2. Add coordinator approval for bookings of department-owned labs.
-3. Add explicit requester/reviewer inequality checks to every approval action.
-4. Add a validated base-dataset upload/version flow instead of only the pinned supplied dataset.
+The original self-review hardening suggestion is not part of this implementation round. Existing requester/reviewer role separation and login behavior remain unchanged at the product owner’s explicit request.
 
-These gaps do not change the current organiser-validator result: both committed scheduling exports remain at **0 hard violations**.
+The three implemented compliance gaps do not alter the committed scoring exports: both remain at **0 hard violations**.

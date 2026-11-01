@@ -29,9 +29,11 @@ import type { ReactNode } from "react";
 import {
   approveBookingAction,
   approveChangeRequestAction,
+  approveDepartmentLabBookingAction,
   markNotificationReadAction,
   rejectBookingAction,
   rejectChangeRequestAction,
+  rejectDepartmentLabBookingAction,
 } from "@/lib/actions";
 import { CHANGE_TYPE_LABEL, DAY_SHORT, DAYS, ROOM_TYPE_LABEL, categoryLabel } from "@/lib/constants";
 import type { ProposedChange, RoomRow, SlotRef } from "@/db/schema";
@@ -201,6 +203,34 @@ export function BookingReviewActions({ booking, alternatives }: { booking: Booki
                 {r.code} · {r.name} ({r.capacity} seats)
               </option>
             ))}
+          </Select>
+        </FormField>
+      </ConfirmAction>
+    </div>
+  );
+}
+
+export function DepartmentLabBookingReviewActions({ booking, alternatives }: { booking: BookingView; alternatives: Pick<RoomRow, "id" | "code" | "name" | "capacity">[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <InlineAction action={approveDepartmentLabBookingAction} fields={{ id: booking.id }} variant="primary" icon={<Check />} pendingLabel="Approving…">
+        Approve lab
+      </InlineAction>
+      <ConfirmAction
+        action={rejectDepartmentLabBookingAction}
+        fields={{ id: booking.id }}
+        trigger={<><X aria-hidden /> Reject</>}
+        title={`Reject “${booking.title}”`}
+        description="The requester will receive your reason and any department-lab alternative."
+        confirmLabel="Reject request"
+      >
+        <FormField name="reason" label="Reason" required>
+          <Textarea id={`lab-reason-${booking.id}`} name="reason" placeholder="Explain why the lab request can't be approved…" maxLength={400} />
+        </FormField>
+        <FormField name="suggestedRoomId" label="Suggest another department lab" hint={alternatives.length ? "Only compatible, conflict-free department labs are listed." : "No alternative department lab is currently available."}>
+          <Select id={`lab-alternative-${booking.id}`} name="suggestedRoomId" defaultValue={alternatives[0]?.id ?? ""}>
+            <option value="">No suggestion</option>
+            {alternatives.map((room) => <option key={room.id} value={room.id}>{room.code} · {room.name} ({room.capacity} seats)</option>)}
           </Select>
         </FormField>
       </ConfirmAction>

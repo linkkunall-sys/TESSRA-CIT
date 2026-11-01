@@ -461,7 +461,7 @@ export async function buildBookingAnalyzer() {
     return out;
   }
 
-  function alternatives(b: BookingProbe, opts: { bookableOnly?: boolean; limit?: number } = {}) {
+  function alternatives(b: BookingProbe, opts: { bookableOnly?: boolean; includeLabs?: boolean; limit?: number } = {}) {
     return roomRows
       .filter(
         (r) =>

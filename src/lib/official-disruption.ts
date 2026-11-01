@@ -30,7 +30,18 @@ export type RepairWorkflow = {
   rejectedById?: number;
 };
 
-export type StoredValidatorReport = ValidatorReport & { _workflow?: RepairWorkflow };
+export type OfficialDatasetSnapshot = {
+  data: OfficialDataset;
+  sourceName: string;
+  sha256: string;
+  loadedAt: string;
+  loadedById: number;
+};
+
+export type StoredValidatorReport = ValidatorReport & {
+  _workflow?: RepairWorkflow;
+  _dataset?: OfficialDatasetSnapshot;
+};
 
 export type DisruptionValidation =
   | { ok: true; disruption: OfficialDisruption; summary: DisruptionSummary }
@@ -268,9 +279,16 @@ export function getRepairWorkflow(report: unknown): RepairWorkflow | null {
   return workflow as unknown as RepairWorkflow;
 }
 
-/** Internal workflow metadata is never included in the organiser report download. */
+export function getOfficialDatasetSnapshot(report: unknown): OfficialDatasetSnapshot | null {
+  if (!record(report) || !record(report._dataset)) return null;
+  const snapshot = report._dataset;
+  if (!record(snapshot.data) || !nonEmptyString(snapshot.sourceName) || !nonEmptyString(snapshot.sha256) || !nonEmptyString(snapshot.loadedAt) || !integer(snapshot.loadedById, 1, Number.MAX_SAFE_INTEGER)) return null;
+  return snapshot as unknown as OfficialDatasetSnapshot;
+}
+
+/** Internal workflow and uploaded-dataset metadata never enter organiser report downloads. */
 export function stripRepairWorkflow(report: unknown): ValidatorReport {
   const stored = report as StoredValidatorReport;
-  const { _workflow: _ignored, ...officialReport } = stored;
+  const { _workflow: _ignoredWorkflow, _dataset: _ignoredDataset, ...officialReport } = stored;
   return officialReport as ValidatorReport;
 }

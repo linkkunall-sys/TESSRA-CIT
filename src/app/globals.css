@@ -1,0 +1,188 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   TESSRA DESIGN TOKENS
+   Every colour, radius, shadow and motion value used by the UI lives here.
+   Components only reference these tokens via Tailwind utilities
+   (e.g. bg-brand-500, text-ink-2, border-line, shadow-card).
+   ========================================================================== */
+
+@theme {
+  /* Typography */
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Brand — emerald signature accent */
+  --color-brand-50: #ecfdf5; /* Pale mint — subtle highlights */
+  --color-brand-100: #d1fae5; /* Mint — selected backgrounds */
+  --color-brand-200: #a7f3d0;
+  --color-brand-300: #6ee7b7;
+  --color-brand-400: #34d399;
+  --color-brand-500: #10b981; /* Primary */
+  --color-brand-600: #059669; /* Primary hover */
+  --color-brand-700: #047857; /* Primary strong */
+  --color-brand-800: #065f46;
+  --color-brand-900: #064e3b;
+
+  /* Neutrals — charcoal & slate */
+  --color-ink: #1f2933; /* Charcoal — main text / dark surfaces */
+  --color-ink-2: #475569; /* Slate — secondary text */
+  --color-ink-3: #94a3b8; /* Muted — hints & secondary icons */
+  --color-line: #e2e8f0; /* Border */
+  --color-line-strong: #cbd5e1;
+  --color-canvas: #f5f7f6; /* Application background */
+  --color-surface: #ffffff; /* Cards, panels, tables */
+  --color-subtle: #f8faf9; /* Table headers, hover rows */
+  --color-muted-bg: #f1f5f4; /* Neutral chips, ghost hover */
+
+  /* Semantic status */
+  --color-success-bg: #dcfce7;
+  --color-success-fg: #166534;
+  --color-success: #16a34a;
+  --color-warning-bg: #fef3c7;
+  --color-warning-fg: #92400e;
+  --color-warning: #d97706;
+  --color-danger-bg: #fee2e2;
+  --color-danger-bg-strong: #fecaca;
+  --color-danger-fg: #991b1b;
+  --color-danger: #dc2626;
+  --color-info-bg: #dbeafe;
+  --color-info-fg: #1e40af;
+  --color-info: #2563eb;
+  --color-neutral-bg: #f1f5f9;
+  --color-neutral-fg: #1f2933;
+
+  /* Timetable categories — soft, coordinated, low-saturation */
+  --color-cat-lecture-bg: #f0f6ff;
+  --color-cat-lecture-fg: #1e3a8a;
+  --color-cat-lecture-bar: #7aa7f7;
+  --color-cat-lab-bg: #f6f3ff;
+  --color-cat-lab-fg: #4c1d95;
+  --color-cat-lab-bar: #a994f5;
+  --color-cat-tutorial-bg: #effcf6;
+  --color-cat-tutorial-fg: #065f46;
+  --color-cat-tutorial-bar: #4fd1a5;
+  --color-cat-exam-bg: #fff7ed;
+  --color-cat-exam-fg: #9a3412;
+  --color-cat-exam-bar: #f8a35c;
+  --color-cat-event-bg: #fdf2f8;
+  --color-cat-event-fg: #9d174d;
+  --color-cat-event-bar: #f08cbf;
+
+  /* Radius scale (10–14px for primary surfaces) */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
+
+  /* Elevation — soft and restrained */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.03);
+  --shadow-raised: 0 4px 12px -2px rgba(16, 24, 40, 0.08), 0 2px 4px -2px rgba(16, 24, 40, 0.04);
+  --shadow-pop: 0 16px 40px -12px rgba(16, 24, 40, 0.22), 0 4px 10px -4px rgba(16, 24, 40, 0.08);
+
+  /* Motion */
+  --animate-fade-in: fade-in 160ms ease-out both;
+  --animate-slide-up: slide-up 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-slide-in-left: slide-in-left 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-pop-in: pop-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes slide-in-left {
+    from { transform: translateX(-100%); }
+    to { transform: none; }
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    font-feature-settings: "cv11", "ss01", "ss03";
+    overflow-x: hidden;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-brand-100);
+    color: var(--color-brand-900);
+  }
+
+  /* Native <dialog> — Tailwind preflight removes UA margin, restore centring */
+  dialog:modal {
+    margin: auto;
+    max-height: calc(100dvh - 2rem);
+  }
+  dialog::backdrop {
+    background: rgb(31 41 51 / 0.45);
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator {
+    opacity: 0.55;
+    cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Utility helpers that are not expressible as single Tailwind classes */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Diagonal hatch used for unavailable timetable slots */
+@utility hatch {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgb(148 163 184 / 0.14) 0 6px,
+    transparent 6px 12px
+  );
+}
+
+/* Brand tile pattern for the sign-in panel (subtle, no gradients) */
+@utility tile-pattern {
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.04) 1px, transparent 1px);
+  background-size: 44px 44px;
+}

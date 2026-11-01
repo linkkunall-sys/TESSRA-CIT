@@ -1,0 +1,33 @@
+{
+  "dataset_id": "cit-public-v1",
+  "schedule_dataset_id": "cit-public-v1",
+  "team": "TESSRA",
+  "soft_penalties": {
+    "S1": 0,
+    "S2": 0,
+    "S3": 0,
+    "S4": 3,
+    "S5": 0,
+    "S6": 0
+  },
+  "soft_total": 3,
+  "stability": {
+    "sessions_moved": 8,
+    "time_changed": 2,
+    "room_only_changed": 6,
+    "moved_ids": [
+      "CE302-L1",
+      "CS202-T1",
+      "CS203-L1",
+      "EC303-L3",
+      "EE303-L3",
+      "HS101-D-L1",
+      "MA101-A-T1",
+      "ME302-L3"
+    ]
+  },
+  "hard_violations": [],
+  "hard_violation_count": 0,
+  "hard_by_rule": {},
+  "warnings": []
+}

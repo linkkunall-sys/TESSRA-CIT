@@ -2,6 +2,39 @@
 
 A full campus scheduling and operations ERP for **Chilika Institute of Technology (CIT)**. This repository retains the complete TESSRA role-based product while using the supplied CIT CrunchWeek starter pack as its only seeded academic/resource dataset.
 
+- **Live application:** [https://tessra-cit.vercel.app](https://tessra-cit.vercel.app)
+- **Public repository:** [https://github.com/linkkunall-sys/TESSRA-CIT](https://github.com/linkkunall-sys/TESSRA-CIT)
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[Admin · Coordinator · Faculty · Club] --> W[Next.js role workspaces]
+    W --> A[Server actions and API routes]
+    A --> V[Deterministic validators and policy guards]
+    A --> P[(Neon PostgreSQL)]
+    A --> E[FastAPI scheduling service]
+    E --> C[OR-Tools CP-SAT]
+    E --> O[Untouched organiser validator.py]
+    W -. optional intent extraction .-> L[LLM provider]
+    L --> V
+    V --> P
+```
+
+The LLM boundary is intentionally non-authoritative: model output can populate an intent, but deterministic code validates every timetable, room, booking, permission and approval decision before any write.
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Web application | Next.js 16 App Router, React 19, TypeScript |
+| Interface | Tailwind CSS, Lucide icons, self-hosted Inter Variable |
+| Data | PostgreSQL on Neon, Drizzle ORM, node-postgres |
+| Scheduling | Python, FastAPI, Google OR-Tools CP-SAT |
+| Verification | Organiser `validator.py`, Node test runner, pytest, ESLint, TypeScript |
+| Deployment | Vercel multi-service project with a private web-to-engine binding |
+| Optional AI | OpenAI-compatible or Anthropic intent extraction with deterministic fallback |
+
 ## What is different in the CIT edition
 
 The CIT data is not confined to a read-only benchmark page. It is imported into the normal relational model and powers every role workspace:
@@ -93,10 +126,10 @@ The first request imports the CIT operational baseline. Do not point this reposi
 
 See `.env.example`. The principal values are:
 
-- `DATABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` for hosted authentication
+- `DATABASE_URL` for PostgreSQL (the live deployment uses Neon)
+- Optional `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` only when choosing Supabase Auth
 - `ENGINE_URL` and optional `ENGINE_TOKEN` for the Python solver service
-- Optional LLM keys used by the scheduling/booking assistant
+- Optional LLM keys used only for assistant intent extraction
 
 Never commit `.env.local`, database credentials, service-role keys, or unrestricted deployment tokens.
 
@@ -135,6 +168,14 @@ These adapters are explicit application metadata, not replacements for the canon
 - `official/starterpack/` — untouched challenge pack
 - `exports/` — validator-clean application exports
 - `drizzle/` and `supabase_schema_migration.sql` — database schema chain
+
+## Known limitations
+
+- The supplied `cit-public-v1` dataset is the deliberately pinned operational baseline. Admins can upload organiser-format change files and restore the baseline, but the UI does not replace the entire base dataset with an arbitrary upload.
+- Live official generation and minimum-move repair require the deployed Python engine service; committed validator-clean exports remain available for reproducibility.
+- Runtime LLM configuration is optional. Without an API key, English/Hinglish booking intake and faculty assistance use deterministic parsers and the manual forms remain fully available.
+- The current deployment uses Neon PostgreSQL and built-in database-backed demo authentication. Supabase credentials are not required or configured.
+- Final submission still requires the team owner to provide the separate walkthrough-video URL requested by the problem statement.
 
 ## License and provenance
 

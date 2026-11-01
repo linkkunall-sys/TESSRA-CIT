@@ -2,9 +2,9 @@
 
 ## Current status
 
-The CIT application is validated and prepared for source delivery, but **no CIT production deployment is configured yet**. This is intentional: the application is committed and pushed before any new database or deployment credentials are requested.
+The CIT application is live at **https://tessra-cit.vercel.app** using a separate Vercel project and Neon PostgreSQL database. `GET /api/health` returns `{"ok":true}`, and all four documented demo accounts have passed authenticated route smoke tests.
 
-Do not point this repository at the frozen original TESSRA database or Vercel project. TESSRA CIT requires separate infrastructure.
+The frozen original TESSRA database and deployment remain separate and must never be reused by this project.
 
 ## Target architecture
 
@@ -46,12 +46,10 @@ The SQL chain contains 135 statements and creates 28 public tables. On the first
 
 Configure values from `.env.example`:
 
-- `DATABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `ENGINE_URL`
+- `DATABASE_URL` (required; the live deployment uses Neon)
+- `ENGINE_URL` (required for hosted official CP-SAT generation)
 - optional `ENGINE_TOKEN`
+- optional `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` only when Supabase Auth is intentionally enabled
 - optional `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, and `AI_BASE_URL`
 
 Keep database passwords, service-role keys, engine tokens, deploy keys, and Vercel tokens server-only. Never commit `.env.local`.
@@ -99,7 +97,7 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 
 1. `GET /api/health` returns `{"ok":true}`.
 2. Confirm first-request seeding completes without a partial import.
-3. Sign in with all four accounts in `access.md`.
+3. Sign in with all four accounts documented in `README.md`.
 4. Check Admin, Coordinator, Faculty, and Club role boundaries.
 5. Use **Restore CIT baseline** and verify 189 sessions, 25 bookings, and 41 exams.
 6. Generate an official schedule from `/admin/official` and confirm 0 hard violations.
@@ -115,7 +113,8 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 - [x] Fresh-install SQL and Drizzle migrations
 - [x] Validator-clean baseline and disruption exports
 - [x] Automated tests, lint, typecheck, audit, and production build
-- [ ] Separate hosted CIT database
-- [ ] Separate CIT Vercel project
-- [ ] Authenticated browser/production smoke matrix
-- [ ] Final walkthrough video/link, if required by the submission owner
+- [x] Separate hosted CIT database (Neon)
+- [x] Separate CIT Vercel project and public production URL
+- [x] Database health plus authenticated production smoke for all four roles
+- [ ] Live CP-SAT generation and repair interaction smoke test
+- [ ] Final walkthrough video/link (submission-owner action)

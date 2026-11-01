@@ -22,7 +22,7 @@ Status legend: ✅ implemented and locally verified · 🟡 partial or requires 
 | Faculty scheduling assistant | Optional LLM intent boundary plus deterministic alternatives and submit-time validation | LLM sanitisation and explanation tests | ✅ |
 | Explain placements/rejections | Hard-validity facts, room fit, alternatives, booking reasons, and validator S1–S6 are surfaced | Explanation tests and persisted source reasons | ✅ |
 | Load changes and export organiser JSON | Canonical base is pinned; all five disruption operations accepted; schedule/report downloads gated by workflow state | 7 disruption/workflow tests | 🟡 base replacement upload intentionally omitted |
-| Authorized manual scheduling | Admin can add/move/pin/remove CIT operational sessions; faculty extra-class requests require Admin approval; daily limits, room eligibility, accessibility, blocks, baskets, capacity, and clashes are rechecked | Operational tests plus server-side action paths | ✅ locally; hosted browser smoke pending |
+| Authorized manual scheduling | Admin can add/move/pin/remove CIT operational sessions; faculty extra-class requests require Admin approval; daily limits, room eligibility, accessibility, blocks, baskets, capacity, and clashes are rechecked | Operational tests, server-side action paths, production role-route smoke | ✅; live write-path walkthrough still recommended |
 
 ## Official hard constraints
 
@@ -78,12 +78,15 @@ Operational generation also scores faculty avoid preferences, daily load, group 
 | CIT-only operational seed | ✅ |
 | Four documented sign-in accounts | ✅ |
 | Separate public repository | ✅ |
-| Separate live CIT deployment | ⬜ infrastructure phase intentionally pending |
+| Separate live CIT deployment | ✅ `https://tessra-cit.vercel.app`; database health and all four role logins verified |
 | Walkthrough video/link | ⬜ submission-owner action |
 
 ## Current honest gaps
 
-1. A replacement base-dataset upload is not exposed; the untouched CIT pack is deliberately canonical.
-2. Hosted Supabase/Vercel authentication, RLS, and browser-route smoke tests require the separate deployment phase.
-3. The official workbench grid is a reproducible output/review surface; direct edits occur in the relational Admin timetable workspace.
-4. Soft optimization may return a hard-valid feasible result if a hosted solver reaches its configured time limit before proving optimality.
+1. A replacement base-dataset upload is not exposed; the untouched CIT pack is deliberately canonical. Organiser-format change-file upload is complete.
+2. The Admin UI does not currently expose editing the official priority order, although the source-defined order, role caps, timestamps and cancellations are enforced by the official allocator.
+3. Coordinator scheduling scope is implemented, but a dedicated coordinator action for approving bookings in department-owned labs is not exposed.
+4. The live deployment has passed database health and all four authenticated route checks; live CP-SAT generation/repair and mobile interaction should still be exercised in the walkthrough.
+5. The official workbench grid is a reproducible output/review surface; direct edits occur in the relational Admin timetable workspace.
+6. Soft optimization may return a hard-valid feasible result if a hosted solver reaches its configured time limit before proving optimality.
+7. The required walkthrough video remains a submission-owner deliverable.

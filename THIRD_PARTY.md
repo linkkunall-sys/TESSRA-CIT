@@ -34,8 +34,9 @@ TESSRA uses the following third-party software. Versions are pinned by `package-
 | Service | Use |
 |---|---|
 | [PostgreSQL](https://www.postgresql.org/) | Application database (PostgreSQL License) |
-| [Supabase](https://supabase.com/) | Hosted PostgreSQL and email/password authentication |
-| [Vercel](https://vercel.com/) | Production deployment |
+| [Neon](https://neon.tech/) | PostgreSQL hosting for the live CIT deployment |
+| [Supabase](https://supabase.com/) | Optional supported authentication provider; not configured in the live CIT deployment |
+| [Vercel](https://vercel.com/) | Production web and scheduling-service deployment |
 | [GitHub](https://github.com/) | Source control and public repository hosting |
 | OpenAI Chat Completions API or a compatible endpoint (optional) | Faculty-request JSON intent extraction when configured |
 | Anthropic Messages API (optional) | Alternative faculty-request JSON intent extraction when configured |

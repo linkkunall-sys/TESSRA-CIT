@@ -55,3 +55,4 @@ __pycache__/
 # Supabase
 supabase/.temp/
 .env*
+!.env.example

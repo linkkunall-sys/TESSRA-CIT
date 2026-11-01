@@ -2,7 +2,7 @@
 
 Audit date: **2026-11-01 (Asia/Kolkata)**.
 
-This audit covers the separate CIT repository and distinguishes completed source delivery from the intentionally pending hosted-infrastructure phase.
+This audit covers the separate CIT repository and its live deployment at `https://tessra-cit.vercel.app`.
 
 ## Source provenance
 
@@ -108,12 +108,19 @@ See `docs/TESTING.md` for commands and exact outputs.
 - This repository uses its own remote, deploy key, source archive, migrations, and future infrastructure.
 - No credential posted in chat was copied into the workspace or Git history.
 
-## Remaining delivery steps
+## Live delivery verification
 
-1. Commit and push the validated application to `linkkunall-sys/TESSRA-CIT`.
-2. Create a separate CIT database and Vercel project.
-3. Configure newly rotated credentials only in hosted environment variables.
-4. Run authenticated desktop/mobile browser smoke tests against that deployment.
-5. Add the final live URL and walkthrough link if required.
+- Public repository: `https://github.com/linkkunall-sys/TESSRA-CIT` (public, `main`).
+- Production application: `https://tessra-cit.vercel.app`.
+- Dedicated database: Neon PostgreSQL; the original Supabase project was not accessed or changed.
+- `GET /api/health`: HTTP 200 with `{"ok":true}`.
+- Administrator, coordinator, faculty and club demo credentials each authenticated successfully and reached their protected role route.
+- The live URL, architecture diagram, tech stack, setup, demo accounts and known limitations are documented in the root README.
 
-No live-CIT or browser-production claim is made before those steps occur.
+## Remaining submission-owner steps
+
+1. Exercise live official CP-SAT generation and uploaded-change repair in a browser and download both outputs.
+2. Perform a short phone/mobile visual pass.
+3. Record the required walkthrough (maximum five minutes) and submit its viewable URL.
+4. Revoke the Vercel token exposed during deployment setup and retain only a newly rotated credential if one remains necessary.
+5. Make no repository or deployment changes after the official submission deadline.

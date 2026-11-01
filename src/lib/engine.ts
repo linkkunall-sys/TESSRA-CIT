@@ -28,7 +28,27 @@ export async function getPublishedVersion() {
   return v ?? null;
 }
 
-export function toEngineSession(s: t.SessionRow): EngineSession {
+type SessionEligibility = { expectedSize: number; allowedRoomIds: number[] };
+
+function inferSessionEligibility(
+  session: t.SessionRow,
+  roomRows: t.RoomRow[],
+  groupRows: t.GroupRow[],
+  userRows: { id: number; needsAccessible: boolean }[],
+): SessionEligibility {
+  const selectedGroups = groupRows.filter((group) => session.groupIds.includes(group.id));
+  const expectedSize = session.expectedSize ?? selectedGroups.reduce((sum, group) => sum + group.size, 0);
+  const needsAccessible = Boolean(userRows.find((user) => user.id === session.facultyId)?.needsAccessible || selectedGroups.some((group) => group.needsAccessible));
+  const requiredUse = session.kind === "lab" ? "lab" : session.kind === "tutorial" ? "tutorial" : "lecture";
+  return {
+    expectedSize,
+    allowedRoomIds: roomRows
+      .filter((room) => room.allowedUses.includes(requiredUse) && room.capacity >= expectedSize && (!needsAccessible || room.accessible))
+      .map((room) => room.id),
+  };
+}
+
+export function toEngineSession(s: t.SessionRow, offering?: t.OfferingRow | null, fallback?: SessionEligibility): EngineSession {
   return {
     id: s.id,
     offeringId: s.offeringId,
@@ -36,23 +56,30 @@ export function toEngineSession(s: t.SessionRow): EngineSession {
     facultyId: s.facultyId,
     roomId: s.roomId,
     groupIds: s.groupIds,
+    expectedSize: s.expectedSize ?? fallback?.expectedSize,
     day: s.day,
     startPeriod: s.startPeriod,
     duration: s.duration,
     kind: s.kind,
+    sourceId: s.sourceId,
+    basketSlot: s.basketSlot,
+    allowedRoomIds: offering?.allowedRoomIds.length ? offering.allowedRoomIds : fallback?.allowedRoomIds,
     isFixed: s.isFixed,
   };
 }
 
 export async function loadEngineState(versionId: number | null) {
-  const [roomRows, groupRows, courseRows, userRows, blockRows, sessionRows] = await Promise.all([
+  const [roomRows, groupRows, courseRows, userRows, blockRows, roomBlockRows, preferenceRows, offeringRows, sessionRows] = await Promise.all([
     db.select().from(t.rooms),
     db.select().from(t.studentGroups),
     db.select().from(t.courses),
     db
-      .select({ id: t.users.id, name: t.users.name, role: t.users.role, departmentId: t.users.departmentId })
+      .select({ id: t.users.id, name: t.users.name, role: t.users.role, departmentId: t.users.departmentId, maxHoursPerDay: t.users.maxHoursPerDay, needsAccessible: t.users.needsAccessible })
       .from(t.users),
     db.select().from(t.availabilityBlocks),
+    db.select().from(t.roomAvailabilityBlocks),
+    db.select().from(t.facultyPreferences),
+    db.select().from(t.offerings),
     versionId
       ? db.select().from(t.scheduledSessions).where(eq(t.scheduledSessions.versionId, versionId))
       : Promise.resolve([] as t.SessionRow[]),
@@ -60,22 +87,32 @@ export async function loadEngineState(versionId: number | null) {
   const rooms = new Map(roomRows.map((r) => [r.id, r]));
   const groups = new Map(groupRows.map((g) => [g.id, g]));
   const courses = new Map(courseRows.map((c) => [c.id, c]));
+  const offeringMap = new Map(offeringRows.map((offering) => [offering.id, offering]));
   const people = new Map(userRows.map((u) => [u.id, u]));
+  const facultyDailyLimits = new Map(userRows.filter((user) => user.maxHoursPerDay).map((user) => [user.id, user.maxHoursPerDay as number]));
   const labels: Labels = {
     room: (id) => rooms.get(id)?.code ?? `Room #${id}`,
     group: (id) => groups.get(id)?.code ?? `Group #${id}`,
     faculty: (id) => people.get(id)?.name ?? `Faculty #${id}`,
     course: (id) => courses.get(id)?.code ?? `Course #${id}`,
   };
-  const ctx: EngineContext = { rooms, groups, blocks: blockRows, labels };
+  const ctx: EngineContext = { rooms, groups, blocks: blockRows, roomBlocks: roomBlockRows, preferences: preferenceRows, facultyDailyLimits, labels };
   return {
     roomRows,
     groupRows,
     courseRows,
     userRows,
     blockRows,
+    roomBlockRows,
+    preferenceRows,
+    offeringRows,
+    facultyDailyLimits,
     sessionRows,
-    sessions: sessionRows.map(toEngineSession),
+    sessions: sessionRows.map((session) => toEngineSession(
+      session,
+      session.offeringId ? offeringMap.get(session.offeringId) : null,
+      inferSessionEligibility(session, roomRows, groupRows, userRows),
+    )),
     rooms,
     groups,
     courses,
@@ -103,11 +140,14 @@ export async function notify(userId: number, title: string, body: string, tone: 
 /* -------------------------------------------------------------------------- */
 export async function generateVersion(actorId: number | null, notes: string | null) {
   const pub = await getPublishedVersion();
-  const [offRows, roomRows, groupRows, blockRows, courseRows] = await Promise.all([
+  const [offRows, roomRows, groupRows, blockRows, roomBlockRows, preferenceRows, facultyLimitRows, courseRows] = await Promise.all([
     db.select().from(t.offerings),
     db.select().from(t.rooms),
     db.select().from(t.studentGroups),
     db.select().from(t.availabilityBlocks),
+    db.select().from(t.roomAvailabilityBlocks),
+    db.select().from(t.facultyPreferences),
+    db.select({ id: t.users.id, maxHoursPerDay: t.users.maxHoursPerDay, needsAccessible: t.users.needsAccessible }).from(t.users).where(eq(t.users.role, "faculty")),
     db.select().from(t.courses),
   ]);
   const fixedRows = pub
@@ -118,6 +158,7 @@ export async function generateVersion(actorId: number | null, notes: string | nu
     : [];
   const courseMap = new Map(courseRows.map((c) => [c.id, c]));
   const groupMap = new Map(groupRows.map((g) => [g.id, g]));
+  const offeringMap = new Map(offRows.map((offering) => [offering.id, offering]));
   const result = generateSchedule({
     offerings: offRows.map((o) => ({
       ...o,
@@ -126,7 +167,14 @@ export async function generateVersion(actorId: number | null, notes: string | nu
     rooms: roomRows,
     groups: groupRows,
     blocks: blockRows,
-    fixed: fixedRows.map(toEngineSession),
+    roomBlocks: roomBlockRows,
+    preferences: preferenceRows,
+    facultyDailyLimits: new Map(facultyLimitRows.filter((row) => row.maxHoursPerDay).map((row) => [row.id, row.maxHoursPerDay as number])),
+    fixed: fixedRows.map((session) => toEngineSession(
+      session,
+      session.offeringId ? offeringMap.get(session.offeringId) : null,
+      inferSessionEligibility(session, roomRows, groupRows, facultyLimitRows),
+    )),
   });
   // Derive the display label from the committed serial ID. The insert + relabel
   // transaction prevents concurrent serverless generations from producing two
@@ -152,10 +200,13 @@ export async function generateVersion(actorId: number | null, notes: string | nu
         facultyId: s.facultyId,
         roomId: s.roomId,
         groupIds: s.groupIds,
+        expectedSize: s.expectedSize,
         day: s.day,
         startPeriod: s.startPeriod,
         duration: s.duration,
         kind: s.kind,
+        sourceId: s.sourceId,
+        basketSlot: s.basketSlot,
         isFixed: s.isFixed,
       })),
     );
@@ -190,6 +241,7 @@ export async function ensureSinglePublishedVersion() {
       await tx.update(t.scheduleVersions).set({ status: "archived" }).where(inArray(t.scheduleVersions.id, stale));
     }
     for (const version of versions) {
+      if (version.label.startsWith("CIT ")) continue;
       const label = `Version ${version.id}`;
       if (version.label !== label) {
         await tx.update(t.scheduleVersions).set({ label }).where(eq(t.scheduleVersions.id, version.id));
@@ -340,8 +392,9 @@ export type BookingProbe = { id?: number; roomId: number; date: string; startTim
 
 export async function buildBookingAnalyzer() {
   const pub = await getPublishedVersion();
-  const [roomRows, bookingRows, examRows, sessionRows, courseRows] = await Promise.all([
+  const [roomRows, roomBlockRows, bookingRows, examRows, sessionRows, courseRows] = await Promise.all([
     db.select().from(t.rooms),
+    db.select().from(t.roomAvailabilityBlocks),
     db.select().from(t.bookings).where(inArray(t.bookings.status, ["approved", "pending"])),
     db.select().from(t.exams),
     pub ? db.select().from(t.scheduledSessions).where(eq(t.scheduledSessions.versionId, pub.id)) : Promise.resolve([] as t.SessionRow[]),
@@ -377,7 +430,8 @@ export async function buildBookingAnalyzer() {
       });
     }
     for (const x of examRows) {
-      if (x.roomId !== roomId || x.date !== b.date) continue;
+      const examRoomIds = x.roomIds.length ? x.roomIds : [x.roomId];
+      if (!examRoomIds.includes(roomId) || x.date !== b.date) continue;
       if (overlaps(s, e, toMinutes(x.startTime), toMinutes(x.endTime))) {
         out.push({ kind: "exam", severity: "error", message: `Examination ${courseCode.get(x.courseId) ?? ""} scheduled ${x.startTime}–${x.endTime}` });
       }
@@ -385,6 +439,14 @@ export async function buildBookingAnalyzer() {
     const day = dayIndexFromIso(b.date);
     if (day >= 0) {
       const periods = periodsInRange(b.startTime, b.endTime);
+      const roomBlocks = roomBlockRows.filter((block) => block.roomId === roomId && block.day === day && periods.includes(block.period));
+      if (roomBlocks.length) {
+        out.push({
+          kind: "maintenance",
+          severity: "error",
+          message: `${room.code} is unavailable in this window${roomBlocks[0].reason ? ` — ${roomBlocks[0].reason}` : ""}`,
+        });
+      }
       const clashes = sessionRows.filter(
         (ss) => ss.roomId === roomId && ss.day === day && periods.some((p) => p >= ss.startPeriod && p < ss.startPeriod + ss.duration),
       );
@@ -406,9 +468,8 @@ export async function buildBookingAnalyzer() {
           r.id !== b.roomId &&
           r.status === "active" &&
           r.capacity >= b.attendees &&
-          r.type !== "lab" &&
-          r.type !== "exam_hall" &&
-          (!opts.bookableOnly || r.bookable),
+          (r.bookable || r.allowedUses.includes("event")) &&
+          (!opts.bookableOnly || r.bookable || r.allowedUses.includes("event")),
       )
       .filter((r) => !check(b, r.id).some((c) => c.severity === "error"))
       .sort((a, c) => a.capacity - c.capacity)
@@ -433,9 +494,26 @@ export type SessionDraft = {
 
 const DRAFT_ID = -987654321;
 
+function draftRoomEligibility(state: EngineState, draft: SessionDraft) {
+  const expectedSize = draft.groupIds.reduce((sum, groupId) => sum + (state.groups.get(groupId)?.size ?? 0), 0);
+  const needsAccessible = Boolean(
+    state.userRows.find((user) => user.id === draft.facultyId)?.needsAccessible ||
+    draft.groupIds.some((groupId) => state.groups.get(groupId)?.needsAccessible),
+  );
+  const requiredUse = draft.kind === "lab" ? "lab" : draft.kind === "tutorial" ? "tutorial" : "lecture";
+  const allowedRoomIds = state.roomRows
+    .filter((room) => room.allowedUses.includes(requiredUse) && room.capacity >= expectedSize && (!needsAccessible || room.accessible))
+    .map((room) => room.id);
+  return { expectedSize, allowedRoomIds };
+}
+
 /** Validates a brand-new session against a version's full timetable. */
 export function validateDraftSession(state: EngineState, draft: SessionDraft & { roomId: number }) {
-  const temp = { id: DRAFT_ID, offeringId: null, isFixed: false, ...draft };
+  const eligibility = draftRoomEligibility(state, draft);
+  if (!eligibility.allowedRoomIds.length) {
+    return { ok: false, issues: ["No CIT venue satisfies this session's use, capacity, and accessibility requirements"] };
+  }
+  const temp = { id: DRAFT_ID, offeringId: null, isFixed: false, ...draft, ...eligibility };
   const issues = validateSessions([...state.sessions, temp], state.ctx).filter(
     (i) => i.sessionIds.includes(DRAFT_ID) && (i.severity === "error" || i.code === "spans_break"),
   );
@@ -444,13 +522,12 @@ export function validateDraftSession(state: EngineState, draft: SessionDraft & {
 
 /** Smallest compatible free room for a draft at its slot (ignores one session being moved). */
 export function findFreeRoom(state: EngineState, draft: SessionDraft, ignoreSessionId?: number) {
-  const size = draft.groupIds.reduce((n, g) => n + (state.groups.get(g)?.size ?? 0), 0);
-  const types = draft.kind === "lab" ? ["lab"] : ["lecture", "seminar", "auditorium"];
+  const eligibility = draftRoomEligibility(state, draft);
   const base: EngineState = ignoreSessionId
     ? { ...state, sessions: state.sessions.filter((s) => s.id !== ignoreSessionId) }
     : state;
   const candidates = [...state.rooms.values()]
-    .filter((r) => r.status === "active" && (types as string[]).includes(r.type) && r.capacity >= size)
+    .filter((room) => room.status === "active" && eligibility.allowedRoomIds.includes(room.id))
     .sort((a, b) => a.capacity - b.capacity);
   for (const room of candidates) {
     if (validateDraftSession(base, { ...draft, roomId: room.id }).ok) return room;

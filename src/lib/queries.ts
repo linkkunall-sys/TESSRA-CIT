@@ -39,6 +39,7 @@ export const getRef = cache(async () => {
     db
       .select({
         id: t.users.id,
+        sourceId: t.users.sourceId,
         name: t.users.name,
         email: t.users.email,
         role: t.users.role,
@@ -46,6 +47,8 @@ export const getRef = cache(async () => {
         departmentId: t.users.departmentId,
         clubId: t.users.clubId,
         maxWeeklyPeriods: t.users.maxWeeklyPeriods,
+        maxHoursPerDay: t.users.maxHoursPerDay,
+        needsAccessible: t.users.needsAccessible,
       })
       .from(t.users)
       .orderBy(t.users.name),
@@ -88,6 +91,9 @@ export type SessionView = {
   startPeriod: number;
   duration: number;
   kind: t.SessionKind;
+  sourceId: string | null;
+  basketSlot: string | null;
+  expectedSize: number | null;
   isFixed: boolean;
   courseId: number;
   courseCode: string;
@@ -122,6 +128,9 @@ export const getTimetable = cache(async (versionId: number) => {
         startPeriod: s.startPeriod,
         duration: s.duration,
         kind: s.kind,
+        sourceId: s.sourceId,
+        basketSlot: s.basketSlot,
+        expectedSize: s.expectedSize,
         isFixed: s.isFixed,
         courseId: s.courseId,
         courseCode: course?.code ?? "—",
@@ -135,7 +144,7 @@ export const getTimetable = cache(async (versionId: number) => {
         roomStatus: room?.status ?? "active",
         groupIds: s.groupIds,
         groupCodes: s.groupIds.map(state.labels.group),
-        size: s.groupIds.reduce((n, g) => n + (state.groups.get(g)?.size ?? 0), 0),
+        size: s.expectedSize ?? s.groupIds.reduce((n, g) => n + (state.groups.get(g)?.size ?? 0), 0),
         combined: s.groupIds.length > 1,
       };
     })
@@ -187,8 +196,12 @@ export async function listBookings(filter: { requesterId?: number; departmentId?
     const requester = ref.personMap.get(b.requesterId);
     return {
       ...b,
-      requesterName: requester?.name ?? "Unknown",
-      requesterRole: requester?.role ?? null,
+      requesterName: b.sourceRequester ?? requester?.name ?? "Unknown",
+      requesterRole: b.sourceRequesterRole === "department_coordinator"
+        ? "coordinator"
+        : (["admin", "faculty", "club"] as string[]).includes(b.sourceRequesterRole ?? "")
+          ? b.sourceRequesterRole as Role
+          : requester?.role ?? null,
       orgName: b.clubId ? ref.clubMap.get(b.clubId)?.name ?? "Club" : b.departmentId ? ref.deptMap.get(b.departmentId)?.name ?? "Department" : "Campus",
       roomCode: room?.code ?? "—",
       roomName: room?.name ?? "",
@@ -292,16 +305,20 @@ export async function getExams() {
     },
   });
   return rows.map((e) => {
-    const room = ref.roomMap.get(e.roomId);
-    const course = ref.courseMap.get(e.courseId);
+    const assignedRooms = (e.roomIds.length ? e.roomIds : [e.roomId])
+      .map((id) => ref.roomMap.get(id))
+      .filter((room): room is NonNullable<typeof room> => Boolean(room));
+    const assignedCourses = (e.courseIds.length ? e.courseIds : [e.courseId])
+      .map((id) => ref.courseMap.get(id))
+      .filter((course): course is NonNullable<typeof course> => Boolean(course));
     return {
       ...e,
-      courseCode: course?.code ?? "—",
-      courseTitle: course?.title ?? "",
+      courseCode: assignedCourses.map((course) => course.code).join(" + ") || "—",
+      courseTitle: assignedCourses.map((course) => course.title).join(" + "),
       groupCodes: e.groupIds.map((g) => ref.groupMap.get(g)?.code ?? "—"),
-      roomCode: room?.code ?? "—",
-      roomName: room?.name ?? "",
-      roomCapacity: room?.capacity ?? 0,
+      roomCode: assignedRooms.map((room) => room.code).join(" + ") || "—",
+      roomName: assignedRooms.map((room) => room.name).join(" + "),
+      roomCapacity: assignedRooms.reduce((sum, room) => sum + Math.floor(room.capacity / 2), 0),
       invigilatorName: e.invigilatorId ? ref.personMap.get(e.invigilatorId)?.name ?? null : null,
       issues: issues.get(e.id) ?? [],
     };

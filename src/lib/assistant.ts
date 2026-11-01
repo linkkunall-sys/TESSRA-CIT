@@ -257,7 +257,8 @@ export async function respond(user: CurrentUser, raw: string): Promise<Reply> {
     const minCap = llmIntent?.minCapacity ?? (capMatch ? Number(capMatch[1]) : 1);
     const wantsLab = llmIntent?.roomKind === "lab" || /\blab/.test(text);
     const free = state.roomRows
-      .filter((r) => r.status === "active" && r.capacity >= minCap && (wantsLab ? r.type === "lab" : ["lecture", "seminar", "auditorium"].includes(r.type)))
+      .filter((room) => room.status === "active" && room.capacity >= minCap && (wantsLab ? room.allowedUses.includes("lab") : room.allowedUses.some((use) => use === "lecture" || use === "tutorial")))
+      .filter((room) => !state.roomBlockRows.some((block) => block.roomId === room.id && block.day === day && wanted.includes(block.period)))
       .filter((r) => !state.sessions.some((s) => s.roomId === r.id && wanted.some((p) => covers(s, day, p))))
       .sort((a, b) => a.capacity - b.capacity)
       .slice(0, 6);

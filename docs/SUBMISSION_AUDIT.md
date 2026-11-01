@@ -1,31 +1,21 @@
-# TESSRA Submission Audit
+# TESSRA CIT — Delivery Audit
 
-Audit date: 2026-11-01 (Asia/Kolkata)
+Audit date: **2026-11-01 (Asia/Kolkata)**.
 
-This is an evidence-based audit against the supplied Crunch Week problem statement, starter pack, official validator and the separately supplied ZIP. It deliberately separates objective validator results from subjective or comparative marks that only judges can award.
+This audit covers the separate CIT repository and distinguishes completed source delivery from the intentionally pending hosted-infrastructure phase.
 
-## 1. Material inspected
+## Source provenance
 
-- Original six-page `Problem-statement.pdf` supplied through Dropbox (SHA-256 `f4b5987026efd285b490b1d596ae94e5f75bed1f1c5cc71923a4fe030e03a5d3`)
-- Extracted problem statement: `official/problem-statement.txt`
-- Starter-pack guide: `official/starterpack/CrunchWeek_StarterPack/README.md`
-- Full dataset: `data/cit_public.json`
-- All nine CSV files
-- Official `validator.py`
-- `examples/sample_disruption.json`
-- `examples/sample_requests.md`
-- `examples/schedule.example.json`
-- Current `exports/schedule.json` and `exports/schedule_after.json`
-- Supplied archive: `tessra-premium-ui-redesign-4.zip`
-- Current GitHub/live implementation and automated test suites
+- Canonical archive: `source/CrunchWeek_StarterPack-1.zip`
+- Archive SHA-256: `7e68a8170c5ca0c0aaaa8c3096d90c02d2224d1d7b6688fbda7c6c0a12a45997`
+- Canonical JSON: `official/starterpack/CrunchWeek_StarterPack/data/cit_public.json`
+- Untouched organiser validator: `official/starterpack/CrunchWeek_StarterPack/validator.py`
+- Validator SHA-256: `f02733b382fa111e89cd6bb261e185ae57da6e41795f094b96cab1575d6ee144`
+- Engine copy comparison: byte-identical
 
-The original PDF was downloaded and checked directly. All six pages were also rasterised and visually inspected: there is **no sample timetable, timetable screenshot, mandated grid design or embedded image** to copy. The only visible tables cover role permissions, dataset counts and judging criteria. Its requirements, constraints, submission rules and 100-mark rubric agree with the repository's extracted text; no extra scoring rule was found in the PDF layout.
+Verified source counts:
 
-## 2. Starter-pack integrity and counts
-
-The JSON and CSV copies agree on the organiser's headline counts:
-
-| Input | Count |
+| Entity | Count |
 |---|---:|
 | Rooms | 27 |
 | Room-unavailability records | 2 |
@@ -33,145 +23,97 @@ The JSON and CSV copies agree on the organiser's headline counts:
 | Student groups | 14 |
 | Courses | 62 |
 | Sessions | 189 |
+| Teaching periods | 243 |
 | Booking requests | 25 |
 | Cancellations | 1 |
-| Exams | 41 |
+| Examinations | 41 |
 
-The calendar has MON–FRI teaching periods P1–P9, event-only periods P10–P13, lunch after P5, and three-hour lab starts P2/P6. The priority order and role caps in the JSON match the statement. Both the official CIT workspace and the interactive role workspaces now use this teaching-day model; P10–P13 remain booking-only.
+## Operational conversion audit
 
-The deployed validator copy is byte-identical to the organiser file:
+The source data powers the normal role workspaces rather than living only on the official benchmark page.
 
-- SHA-256: `f02733b382fa111e89cd6bb261e185ae57da6e41795f094b96cab1575d6ee144`
-- Size: 23,176 bytes
+- Source IDs are stored on users, rooms, groups, courses, offerings, sessions, bookings, and exams.
+- Faculty daily limits, accessibility, hard unavailability, and soft preferences are imported.
+- Room source types, features, accessibility, allowed uses, and period blocks are imported.
+- Each source session stores expected attendance, basket slot, and exact room eligibility.
+- Booking windows, mandatory groups, requested room/types, raw wording, source requester name, and source role are retained.
+- “Office of the Dean of Academics” has a distinct source-derived coordinator profile and is not conflated with faculty F37.
+- Exams retain every course and room in their source allocation.
+- Weekday-only source fields retain their original metadata while deterministic ISO adapters support role workflows.
 
-## 3. Supplied ZIP: actual result
+A transaction-level seed/restore smoke test produced:
 
-The archive is structurally valid: `unzip -t` reports no compressed-data errors. However, it is an old snapshot and **must not be submitted as the final build**.
-
-### Validator results from the ZIP itself
-
-| ZIP export | Hard | Soft | Booking score | Repair movement |
-|---|---:|---:|---:|---:|
-| `schedule.json` | 0 | 3 | 63.5 / 70 | — |
-| `schedule_after.json` | 0 | 3 | — | **180 moved**: 172 time changes + 8 room-only |
-
-The ZIP README claims approximately ten moved sessions, but the official validator counts 180 against that ZIP's own baseline. This discrepancy is material. The archive also predates the governed minimum-move repair, robust booking parser, placement explanations, production evaluator flow and current evidence.
-
-Notable files absent from the ZIP but present in the current repository include `THIRD_PARTY.md`, `package-lock.json`, the authenticated booking-parser API, parser/LLM/explanation tests, strict disruption-input validation, the deployed official-validator copy, reset workflow, additional evidence documents and current deployment configuration. It also contains `.pytest_cache`, which should not be in a clean submission archive.
-
-### Estimated rubric result for the old ZIP
-
-The old ZIP would likely land around **70–79/100 before any disqualification decision**:
-
-- correctness remains strong because the baseline has zero hard violations;
-- rescheduling loses most or all of the five minimum-movement marks and may lose approval-workflow marks;
-- venue-request AI is largely absent from that snapshot;
-- documentation/submission files are incomplete;
-- the booking and soft scores remain good.
-
-If judged as a standalone submission, its README has no usable production URL and no video link. Those are disqualification risks, not merely point deductions.
-
-## 4. Current repository: objective official results
-
-Commands rerun during the audit:
-
-```bash
-python3 official/starterpack/CrunchWeek_StarterPack/validator.py \
-  --data official/starterpack/CrunchWeek_StarterPack/data/cit_public.json \
-  --schedule exports/schedule.json
-
-python3 official/starterpack/CrunchWeek_StarterPack/validator.py \
-  --data official/starterpack/CrunchWeek_StarterPack/data/cit_public.json \
-  --schedule exports/schedule_after.json \
-  --disruption official/starterpack/CrunchWeek_StarterPack/examples/sample_disruption.json \
-  --baseline exports/schedule.json
+```text
+27 rooms
+56 operational users (40 faculty + source-derived requesters)
+14 groups
+62 courses
+189 offerings
+189 scheduled sessions
+25 bookings
+41 exams
+1 official run
 ```
 
-| Current export | Hard | Soft | Other result |
+Atomic restore returned exactly 189 sessions, 25 bookings, and 41 exams while preserving identities and auth sessions.
+
+## Constraint audit
+
+The operational scheduler enforces:
+
+- P1–P9 teaching bounds, lunch, and P2/P6 three-hour labs;
+- faculty/group/room clashes;
+- faculty and room hard blocks;
+- faculty daily limits;
+- capacity and accessibility;
+- source room eligibility and allowed use;
+- synchronized elective baskets; and
+- multi-room half-capacity examinations.
+
+Manual moves and alternatives use the same engine state. New manual assignments infer room eligibility from use, attendance, accessibility, faculty, and groups. Booking creation restricts users to event-enabled venues and maps human facility labels to CIT source feature codes.
+
+## Official objective results
+
+| Export | Hard | Soft | Other result |
 |---|---:|---:|---|
-| `schedule.json` | **0** | **3** | bookings 65.5/70; 21 approved, 2 alternatives, 2 rejected; 0 priority inversions; exam soft 0 |
-| `schedule_after.json` | **0** | **3** | **8 moved**: 2 time changes + 6 room-only |
+| `exports/schedule.json` | **0** | **3** | bookings 65.5/70; 21 approved, 2 alternatives, 2 rejected; 0 inversions; exam soft 0 |
+| `exports/schedule_after.json` | **0** | **3** | 8 moved: 2 time changes, 6 room-only |
 
-The repair engine proves the lexicographic minimum for the committed baseline before refining soft quality. Movement count is baseline-dependent; tests therefore compare the proved minimum with the independent official-validator count instead of hard-coding eight.
+Artifact fingerprints:
 
-## 5. Hard-constraint coverage
+```text
+ccb344cf1e8d1c3e992c07828e8649031e4c2357d5e9923fd469f7c7eb32268b  exports/schedule.json
+eecb64b67d376ab0e78ce704feac0bbaf64cdef273060db50ac866da39701943  exports/schedule_after.json
+b6ccc02574efb301e211d5a0cf15fabe58dab98a5df2352f36ebd64a59722a52  exports/report.json
+1be2a0efec75e0ec7bdeb1228a39697977cde79c554bfa698d2545f06a127bb2  exports/report_after.json
+```
 
-| Rule | Constraint | Evidence |
-|---|---|---|
-| H1 | Every known session exactly once | CP-SAT exactly-one + missing/unknown regression + official validator |
-| H2 | Faculty cannot clash | occupancy constraint + regression |
-| H3 | Student groups cannot clash; basket semantics | group/basket occupancy + regressions |
-| H4 | Room cannot double-book | room occupancy + regression |
-| H5 | Capacity, including half capacity for exams | timetable/exam constraints + regressions |
-| H6 | Correct room type/use | feasible-room filtering + regression |
-| H7 | Faculty unavailability | slot filtering + regression |
-| H8 | Room unavailability | assignment filtering + regression |
-| H9 | Lunch and P2/P6 lab starts | slot construction + regression |
-| H10 | Accessibility | room filtering + regression |
-| H11 | Elective baskets synchronized | shared basket-time variables + regression |
-| H12 | Faculty daily limit | weighted daily constraint + regression |
-| H13 | Booking/session/group conflicts | deterministic booking allocator + official validator + regressions |
-| H14 | Fixed slots | slot filtering + regression |
+## Automated verification
 
-All five organiser disruption operations are accepted and schema-validated: faculty unavailable, room unavailable, add faculty, add session and remove session. Unknown references, malformed additions, wrong datasets and extra fields are rejected before the engine call.
-
-## 6. Plain-language request audit
-
-All eight public sample prompts and all 25 dataset `raw_text` values were reviewed. The parser now covers:
-
-- English and Romanised-Hindi number words;
-- ranges, 24-hour clocks, flexible windows and explicit durations;
-- `6 straight hours`, audience/dancer attendance nouns and named CIT rooms;
-- multi-day/recurring wording without silently creating a series;
-- visible assumptions for vague periods;
-- follow-ups for missing duration, attendance, date or time;
-- named-room accessibility conflicts such as inaccessible SH-2 → compatible SH-1 search;
-- group IDs such as ECE-3/CSE-3 without misclassifying them as rooms;
-- guest/industry speakers without inventing audio-equipment requirements;
-- midnight crossings and contradictory range/duration text without silently producing a wrong draft;
-- role escalation, fake Dean/Admin claims, priority abuse and approval-bypass attempts without changing code-enforced policy.
-
-Information absent from the original message is not guessed. For example, a compulsory group event with no attendance asks for attendance; a point start time with no duration keeps the start but asks how long it lasts.
-
-## 7. Current test evidence
-
-- TypeScript unit tests: **44/44 passed**
-  - 25 booking parser
-  - 3 calendar/lab-rule regression
-  - 3 placement explanation
-  - 3 LLM boundary/sanitisation
-  - 3 navigation
-  - 7 official disruption/workflow
-- Python engine tests: **33/33 passed**
-- TypeScript typecheck: passed
+- Python engine: **33 passed**
+- TypeScript: **47 passed**
+- TypeScript compiler: passed
 - ESLint: passed
 - Next.js production build: passed
-- `npm audit --omit=dev`: zero vulnerabilities
-- Official baseline and repaired exports: zero hard violations
-- Production official-prompt follow-up: **17/17 assertions passed**, with zero product console errors, page errors or HTTP 5xx responses
-- Production role calendar: **60/60 sessions, 70/70 periods, 0 conflicts, 0 unplaced**; five labs all use P2–P4 or P6–P8; P1–P9 grid and lunch visually verified
+- Production dependency audit: 0 vulnerabilities
+- Fresh schema: 28 tables, 135 statements, passed under `pg-mem`
+- Drizzle migration snapshot check: passed
+- Secret-pattern and legacy-institution scan: no product credential or legacy fixture found; only documented dummy `.env.example` values
 
-## 8. Defensible rating
+See `docs/TESTING.md` for commands and exact outputs.
 
-No one outside the judging panel can produce a truly final mark because optimisation is comparative and AI/usability/design are judge-scored. The objective and defensible estimate for the current repository is:
+## Repository separation
 
-| Criterion | Maximum | Defensible current estimate | Basis / uncertainty |
-|---|---:|---:|---|
-| Scheduling correctness | 25 | **25** | Official validator: zero hard violations |
-| Rescheduling | 15 | **14–15** | Zero hard violations, proved minimum on committed baseline, exact diff and separate Admin approval; hidden change-file runtime remains judge-dependent |
-| Optimisation | 10 | **9–10** | Soft penalty 3; final mark depends on other teams |
-| Use of AI | 15 | **13–15** | Robust tricky-request and explanation behavior; hidden wording remains judge-dependent |
-| Booking decisions | 10 | **9–9.5** | 65.5/70, sensible reasons, zero inversions; BR-09 is impossible and BR-17 exceeds P13 |
-| Usability/dashboard | 10 | **9–10** | Four evaluator paths and production browser checks |
-| UI/design | 10 | **9–10** | Responsive, polished live app; subjective |
-| Code/documentation | 5 | **4.5–5** | Setup, architecture, declarations, tests and traceability are present |
-| **Estimated total** | **100** | **93–98** | Midpoint approximately **96/100** |
+- `/home/user/tessra` remained clean at frozen commit `2845849` during CIT work.
+- This repository uses its own remote, deploy key, source archive, migrations, and future infrastructure.
+- No credential posted in chat was copied into the workspace or Git history.
 
-This estimate is conditional on submission eligibility. It is not a promise of a judge score.
+## Remaining delivery steps
 
-## 9. Submission blockers and risks
+1. Commit and push the validated application to `linkkunall-sys/TESSRA-CIT`.
+2. Create a separate CIT database and Vercel project.
+3. Configure newly rotated credentials only in hosted environment variables.
+4. Run authenticated desktop/mobile browser smoke tests against that deployment.
+5. Add the final live URL and walkthrough link if required.
 
-1. **Video link is not in the repository.** The statement makes a working walkthrough video a disqualification gate. A valid unlisted YouTube or viewable Drive link must be submitted through the required channel and should also be added to the README.
-2. **Deadline status is unknown.** The rules disqualify deployments or pushes after the deadline. Do not make further submission changes if the official deadline has passed.
-3. **Optimisation marks are comparative.** Soft 3 is objectively excellent, but only organisers know the other teams' scores.
-4. **Do not submit the old ZIP.** Generate the clean archive from current tracked files only.
+No live-CIT or browser-production claim is made before those steps occur.

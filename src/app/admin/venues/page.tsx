@@ -66,7 +66,7 @@ export default async function VenuesPage({ searchParams }: { searchParams: Searc
   const view = get("view") === "table" ? "table" : "cards";
   const rooms = ref.rooms.filter(
     (r) =>
-      (!q || `${r.code} ${r.name} ${r.building} ${r.features.join(" ")}`.toLowerCase().includes(q)) &&
+      (!q || `${r.code} ${r.name} ${r.building} ${r.sourceType ?? ""} ${r.features.join(" ")} ${r.allowedUses.join(" ")}`.toLowerCase().includes(q)) &&
       (!type || r.type === type) &&
       (!status || r.status === status) &&
       r.capacity >= cap,
@@ -261,9 +261,15 @@ export default async function VenuesPage({ searchParams }: { searchParams: Searc
                         {r.name} · {r.building}
                       </p>
                     </TD>
-                    <TD className="text-ink-2">{ROOM_TYPE_LABEL[r.type]}</TD>
+                    <TD className="text-ink-2">
+                      {ROOM_TYPE_LABEL[r.type]}
+                      {r.sourceType ? <span className="block font-mono text-[11px] text-ink-3">{r.sourceType}</span> : null}
+                    </TD>
                     <TD className="tabular text-right">{r.capacity}</TD>
-                    <TD className="max-w-[220px] text-xs text-ink-2">{r.features.join(", ") || "—"}</TD>
+                    <TD className="max-w-[240px] text-xs text-ink-2">
+                      {r.features.join(", ") || "—"}
+                      {r.allowedUses.length ? <span className="mt-1 block text-ink-3">Uses: {r.allowedUses.join(", ")}</span> : null}
+                    </TD>
                     <TD>{r.accessible ? <Badge tone="success" icon={Accessibility}>Step-free</Badge> : <Badge tone="neutral">Stairs only</Badge>}</TD>
                     <TD className="tabular text-right">{util(r)}%</TD>
                     {checking && (
@@ -274,6 +280,11 @@ export default async function VenuesPage({ searchParams }: { searchParams: Searc
                     )}
                     <TD>
                       <StatusBadge status={r.status} />
+                      {tt?.state.roomBlockRows.some((block) => block.roomId === r.id) ? (
+                        <p className="mt-1 max-w-[200px] text-xs text-warning-fg">
+                          {tt.state.roomBlockRows.filter((block) => block.roomId === r.id).length} source unavailability slots
+                        </p>
+                      ) : null}
                       {r.maintenanceNote && r.status !== "active" && <p className="mt-1 max-w-[200px] text-xs text-warning-fg">{r.maintenanceNote}</p>}
                     </TD>
                     <TD className="text-right">

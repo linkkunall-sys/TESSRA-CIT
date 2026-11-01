@@ -1,139 +1,30 @@
-# TESSRA — Access Credentials & Deployment Info
+# TESSRA CIT access guide
 
-> ⚠️ **This file contains sensitive credentials.** Do not share publicly.
+## Demo accounts
 
----
+Password for all four accounts: `tessra123`
 
-## 🌐 Live URLs
+| Role | Email | Landing page |
+|---|---|---|
+| Administrator — Spectra Core Team | `spectra.core.team@cit.ac.in` | `/admin` |
+| Department coordinator — ECE Department | `ece.department@cit.ac.in` | `/coordinator` |
+| Faculty — Dr. Ananya Mishra (F01) | `f01@cit.ac.in` | `/faculty` |
+| Club representative — Coding Club | `coding.club@cit.ac.in` | `/club` |
 
-| Service | URL |
-|---------|-----|
-| **Production (Vercel)** | https://tessra-five.vercel.app |
-| **GitHub Repository** | https://github.com/kunalchwdry/TESSRA.git |
+These email addresses are deterministic login adapters derived from starter-pack identities. The source pack does not provide email addresses.
 
----
+## Hosted authentication
 
-## 🔑 Demo Accounts (All passwords: `tessra123`)
+When Supabase variables are configured, first-run seeding creates and email-confirms the four demo Auth users through the service-role API, then links their UUIDs to operational profiles. All other CIT faculty remain operational profiles and can receive accounts through the existing administrator/access-request workflows.
 
-| Role | Email | Password | Dashboard |
-|------|-------|----------|-----------|
-| **Admin** | `admin@westbrook.edu` | `tessra123` | `/admin` |
-| **Department Coordinator** | `coordinator.cse@westbrook.edu` | `tessra123` | `/coordinator` |
-| **Faculty** | `ananya.rao@westbrook.edu` | `tessra123` | `/faculty` |
-| **Club Representative** | `robotics@westbrook.edu` | `tessra123` | `/club` |
+If hosted Auth is not configured, the local password hashes and session implementation support the same credentials.
 
-All accounts are **email-confirmed** and **pre-approved** in Supabase Auth.
+## Separate infrastructure
 
----
+TESSRA CIT must use a database and deployment separate from the completed original TESSRA submission. Apply `supabase_schema_migration.sql` to an empty database, configure environment variables, and allow first-request seeding to import the CIT baseline.
 
-## ☁️ Supabase (Project: `lsdytdpaqogcvutaordj`)
+## Security
 
-| Setting | Value |
-|---------|-------|
-| Project Ref | `lsdytdpaqogcvutaordj` |
-| Auth URL | https://lsdytdpaqogcvutaordj.supabase.co |
-| Email Provider | ✅ **ENABLED** (Authentication → Providers → Email) |
-| Email Confirmation | Enabled for all accounts |
-
-### Supabase Auth Users (created via REST API)
-
-| Email | Auth UUID | Status |
-|-------|-----------|--------|
-| `admin@westbrook.edu` | Created via Supabase admin API | Email-confirmed |
-| `coordinator.cse@westbrook.edu` | Created via Supabase admin API | Email-confirmed |
-| `ananya.rao@westbrook.edu` | Created via Supabase admin API | Email-confirmed |
-| `robotics@westbrook.edu` | Created via Supabase admin API | Email-confirmed |
-
-All passwords reset to `tessra123` via Supabase admin API.
-
-### Environment Variables (Vercel)
-
-| Variable | Value |
-|----------|-------|
-| `DATABASE_URL` | Set in Vercel dashboard (production) |
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://lsdytdpaqogcvutaordj.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Set in Vercel dashboard |
-| `SUPABASE_SERVICE_ROLE_KEY` | Set in Vercel dashboard (server-only) |
-| `NODE_TLS_REJECT_UNAUTHORIZED` | `0` |
-
----
-
-## 🚀 Vercel Deployment
-
-| Setting | Value |
-|---------|-------|
-| Project | `tessra` |
-| Team | `kunalchwdrys-projects` |
-| Production URL | https://tessra-five.vercel.app |
-| GitHub Repo | https://github.com/kunalchwdry/TESSRA.git |
-| GitHub SSH Key | `~/.ssh/id_ed25519_tessra` |
-
-Deploy command:
-```bash
-VERCEL_TOKEN=<token> npx vercel deploy --prod
-```
-
----
-
-## 🗄 Database Migration (CIT Data — Local PostgreSQL)
-
-CIT data successfully migrated to local PostgreSQL:
-
-| Entity | Count |
-|--------|-------|
-| Departments | 12 |
-| Courses | 75 |
-| Student Groups | 20 |
-| Rooms | 41 |
-| Offerings | 214 |
-| Availability Blocks | 95 |
-| Bookings | 38 |
-
-Schema: 26 tables (see `src/db/schema.ts` and `drizzle/0000_supabase_schema.sql`)
-
----
-
-## 🛠 How Access Requests Work
-
-1. User visits `/access-request` and submits: name, email, password, role (coordinator/faculty/club), department/club, reason
-2. Request is stored in `access_requests` table with status `pending`
-3. Admin visits `/admin/access-requests` and reviews pending requests
-4. Admin clicks **Approve** → creates local user record + Supabase Auth user (via service role key) + links `supabase_uid`
-5. User can now sign in at `/login` with their email and password
-6. Admin can also create accounts directly at `/admin/create-account` (instant approval, no request flow needed)
-
----
-
-## 🔧 Local Development
-
-```bash
-# Clone
-git clone https://github.com/kunalchwdry/TESSRA.git
-cd TESSRA
-
-# Install (Node.js 22+)
-npm ci
-python3 -m pip install -r engine/requirements.txt pytest
-
-# Environment (see .env.example)
-cp .env.example .env
-
-# Database
-npx drizzle-kit push
-
-# Run
-npm run dev
-# Open http://localhost:3000
-
-# Sign in with any demo account (password: tessra123)
-```
-
----
-
-## 📝 Notes
-
-- Supabase Auth email provider is **ENABLED** in the dashboard
-- The `admin.createUser()` operation requires the **service role key** (not anon key) — both approve and create-account flows use `createAdminClient()`
-- Login has **self-healing**: if an approved local user lacks a Supabase Auth account, sign-in auto-creates it
-- Port 5432 (Supabase PostgreSQL) is not reachable from the sandbox; the connection pooler port 6543 is reachable but had SSL issues (fixed with `NODE_TLS_REJECT_UNAUTHORIZED=0`)
-- Drizzle-kit push is blocked by TTY requirement in the sandbox; schema SQL is pre-generated at `drizzle/0000_supabase_schema.sql`
+- Never commit `.env.local`.
+- Never expose `SUPABASE_SERVICE_ROLE_KEY`, `SESSION_SECRET`, database passwords, deploy keys, or unrestricted deployment tokens.
+- Replace the demo password before using the application outside a review/demo environment.

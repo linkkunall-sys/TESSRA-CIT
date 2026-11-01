@@ -114,14 +114,14 @@ export default async function SettingsPage() {
           </Card>
           <Card>
             <CardHeader
-              title="Clean demo state"
-              description="Clear mutable activity and publish a freshly generated timetable while preserving accounts and academic reference data."
+              title="CIT baseline restore"
+              description="Atomically restore the committed validator-clean CIT operations while preserving accounts and academic reference data."
               action={<ResetDemoDataButton compact />}
             />
             <CardBody>
               <p className="text-xs leading-5 text-ink-3">
-                The reset is guarded by an administrator role check and refuses to replace the current timetable
-                unless every required session is placed.
+                The restore is guarded by an administrator role check and rolls back completely if any CIT source
+                reference is missing, so a partial baseline is never published.
               </p>
             </CardBody>
           </Card>

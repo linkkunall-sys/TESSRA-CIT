@@ -112,11 +112,11 @@ export default function AccessRequestPage() {
           <form action={submitAccessRequest} className="space-y-4">
             <div>
               <label className="block text-[13px] font-medium text-ink">Full name</label>
-              <Input name="name" placeholder="Aditi Kapoor" required />
+              <Input name="name" placeholder="Dr. Ananya Mishra" required />
             </div>
             <div>
               <label className="block text-[13px] font-medium text-ink">Work email</label>
-              <Input name="email" type="email" placeholder="name@westbrook.edu" required />
+              <Input name="email" type="email" placeholder="name@cit.ac.in" required />
             </div>
             <div>
               <label className="block text-[13px] font-medium text-ink">Password</label>

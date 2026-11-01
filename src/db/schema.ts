@@ -128,6 +128,7 @@ export const clubs = pgTable("clubs", {
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
+  sourceId: text("source_id").unique(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   supabaseUid: text("supabase_uid").unique(),
@@ -137,6 +138,8 @@ export const users = pgTable("users", {
   departmentId: integer("department_id").references(() => departments.id),
   clubId: integer("club_id").references(() => clubs.id),
   maxWeeklyPeriods: integer("max_weekly_periods").notNull().default(16),
+  maxHoursPerDay: integer("max_hours_per_day"),
+  needsAccessible: boolean("needs_accessible").notNull().default(false),
   approvalStatus: text("approval_status").notNull().default("approved"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -152,12 +155,15 @@ export const authSessions = pgTable("auth_sessions", {
 
 export const rooms = pgTable("rooms", {
   id: serial("id").primaryKey(),
+  sourceId: text("source_id").unique(),
   code: text("code").notNull().unique(),
   name: text("name").notNull(),
   building: text("building").notNull(),
   type: text("type").$type<RoomType>().notNull(),
+  sourceType: text("source_type"),
   capacity: integer("capacity").notNull(),
   features: text("features").array().notNull().default(sql`'{}'::text[]`),
+  allowedUses: text("allowed_uses").array().notNull().default(sql`'{}'::text[]`),
   accessible: boolean("accessible").notNull().default(true),
   status: text("status").$type<RoomStatus>().notNull().default("active"),
   maintenanceNote: text("maintenance_note"),
@@ -167,6 +173,7 @@ export const rooms = pgTable("rooms", {
 
 export const studentGroups = pgTable("student_groups", {
   id: serial("id").primaryKey(),
+  sourceId: text("source_id").unique(),
   code: text("code").notNull().unique(),
   name: text("name").notNull(),
   departmentId: integer("department_id")
@@ -174,10 +181,12 @@ export const studentGroups = pgTable("student_groups", {
     .references(() => departments.id),
   year: integer("year").notNull(),
   size: integer("size").notNull(),
+  needsAccessible: boolean("needs_accessible").notNull().default(false),
 });
 
 export const courses = pgTable("courses", {
   id: serial("id").primaryKey(),
+  sourceId: text("source_id").unique(),
   code: text("code").notNull().unique(),
   title: text("title").notNull(),
   departmentId: integer("department_id")
@@ -185,10 +194,15 @@ export const courses = pgTable("courses", {
     .references(() => departments.id),
   credits: integer("credits").notNull().default(3),
   kind: text("kind").$type<SessionKind>().notNull().default("lecture"),
+  year: integer("year"),
+  lectureHours: integer("lecture_hours").notNull().default(0),
+  tutorialHours: integer("tutorial_hours").notNull().default(0),
+  labBlocks: integer("lab_blocks").notNull().default(0),
 });
 
 export const offerings = pgTable("offerings", {
   id: serial("id").primaryKey(),
+  sourceId: text("source_id").unique(),
   courseId: integer("course_id")
     .notNull()
     .references(() => courses.id, { onDelete: "cascade" }),
@@ -196,10 +210,14 @@ export const offerings = pgTable("offerings", {
     .notNull()
     .references(() => users.id),
   groupIds: integer("group_ids").array().notNull(),
+  expectedSize: integer("expected_size"),
   sessionsPerWeek: integer("sessions_per_week").notNull(),
   duration: integer("duration").notNull().default(1),
   kind: text("kind").$type<SessionKind>().notNull(),
   roomType: text("room_type").$type<RoomType>().notNull(),
+  allowedRoomIds: integer("allowed_room_ids").array().notNull().default(sql`'{}'::integer[]`),
+  basketSlot: text("basket_slot"),
+  needsAccessible: boolean("needs_accessible").notNull().default(false),
 });
 
 export const scheduleVersions = pgTable("schedule_versions", {
@@ -231,10 +249,13 @@ export const scheduledSessions = pgTable(
       .notNull()
       .references(() => rooms.id),
     groupIds: integer("group_ids").array().notNull(),
+    expectedSize: integer("expected_size"),
     day: integer("day").notNull(),
     startPeriod: integer("start_period").notNull(),
     duration: integer("duration").notNull().default(1),
     kind: text("kind").$type<SessionKind>().notNull(),
+    sourceId: text("source_id"),
+    basketSlot: text("basket_slot"),
     isFixed: boolean("is_fixed").notNull().default(false),
   },
   (t) => [index("scheduled_sessions_version_idx").on(t.versionId)],
@@ -253,6 +274,37 @@ export const availabilityBlocks = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("availability_blocks_unique").on(t.facultyId, t.day, t.period)],
+);
+
+export const facultyPreferences = pgTable(
+  "faculty_preferences",
+  {
+    id: serial("id").primaryKey(),
+    facultyId: integer("faculty_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    day: integer("day").notNull(),
+    period: integer("period").notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("faculty_preferences_unique").on(t.facultyId, t.type, t.day, t.period)],
+);
+
+export const roomAvailabilityBlocks = pgTable(
+  "room_availability_blocks",
+  {
+    id: serial("id").primaryKey(),
+    roomId: integer("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    day: integer("day").notNull(),
+    period: integer("period").notNull(),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("room_availability_blocks_unique").on(t.roomId, t.day, t.period)],
 );
 
 export const changeRequests = pgTable("change_requests", {
@@ -280,6 +332,7 @@ export const changeRequests = pgTable("change_requests", {
 
 export const bookings = pgTable("bookings", {
   id: serial("id").primaryKey(),
+  sourceId: text("source_id").unique(),
   requesterId: integer("requester_id")
     .notNull()
     .references(() => users.id),
@@ -287,6 +340,8 @@ export const bookings = pgTable("bookings", {
   departmentId: integer("department_id").references(() => departments.id),
   title: text("title").notNull(),
   description: text("description"),
+  sourceRequester: text("source_requester"),
+  sourceRequesterRole: text("source_requester_role"),
   category: text("category").notNull(),
   roomId: integer("room_id")
     .notNull()
@@ -298,6 +353,14 @@ export const bookings = pgTable("bookings", {
   priority: text("priority").$type<Priority>().notNull().default("normal"),
   status: text("status").$type<RequestStatus>().notNull().default("pending"),
   needs: text("needs").array().notNull().default(sql`'{}'::text[]`),
+  requestWindows: jsonb("request_windows").$type<{ day: string; from_period: number; to_period: number }[]>().notNull().default(sql`'[]'::jsonb`),
+  requestedRoomId: integer("requested_room_id").references(() => rooms.id),
+  requestedRoomTypes: text("requested_room_types").array().notNull().default(sql`'{}'::text[]`),
+  mandatoryGroupIds: integer("mandatory_group_ids").array().notNull().default(sql`'{}'::integer[]`),
+  durationPeriods: integer("duration_periods"),
+  seriesId: text("series_id"),
+  rawText: text("raw_text"),
+  officialReason: text("official_reason"),
   rejectionReason: text("rejection_reason"),
   suggestedRoomId: integer("suggested_room_id").references(() => rooms.id),
   reviewerId: integer("reviewer_id").references(() => users.id),
@@ -307,16 +370,21 @@ export const bookings = pgTable("bookings", {
 
 export const exams = pgTable("exams", {
   id: serial("id").primaryKey(),
+  sourceId: text("source_id").unique(),
   courseId: integer("course_id")
     .notNull()
     .references(() => courses.id, { onDelete: "cascade" }),
+  courseIds: integer("course_ids").array().notNull().default(sql`'{}'::integer[]`),
   groupIds: integer("group_ids").array().notNull(),
+  sourceDay: text("source_day"),
+  sourceSession: text("source_session"),
   date: date("date", { mode: "string" }).notNull(),
   startTime: text("start_time").notNull(),
   endTime: text("end_time").notNull(),
   roomId: integer("room_id")
     .notNull()
     .references(() => rooms.id),
+  roomIds: integer("room_ids").array().notNull().default(sql`'{}'::integer[]`),
   invigilatorId: integer("invigilator_id").references(() => users.id),
   candidates: integer("candidates").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

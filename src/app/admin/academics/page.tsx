@@ -2,7 +2,7 @@ import { BookOpen, GraduationCap, Layers, Plus, Trash, Users, Building } from "l
 import type { Metadata } from "next";
 import { ActionForm, ConfirmAction, Dialog, DialogCancel, DialogFooter, FormField, SubmitButton } from "@/components/client";
 import { Badge, Card, CardHeader, EmptyState, Input, PageHeader, ProgressBar, Select, StatCard, TabLinks, Table, TableWrap, TD, TH, THead, TR } from "@/components/ui";
-import { createCourseAction, createGroupAction, createOfferingAction, deleteOfferingAction } from "@/lib/actions";
+import { createClubAction, createCourseAction, createDepartmentAction, createGroupAction, createOfferingAction, deleteOfferingAction } from "@/lib/actions";
 import { requireRole } from "@/lib/auth";
 import { KIND_LABEL, ROOM_TYPE_LABEL } from "@/lib/constants";
 import { readParams, type SearchParams } from "@/lib/params";
@@ -11,7 +11,7 @@ import { plural } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Academic Management" };
 
-const TABS = ["overview", "courses", "groups", "offerings", "faculty"] as const;
+const TABS = ["overview", "departments", "courses", "groups", "offerings", "faculty", "clubs"] as const;
 
 export default async function AcademicsPage({ searchParams }: { searchParams: SearchParams }) {
   await requireRole("admin");
@@ -26,6 +26,37 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
       {d.code} · {d.name}
     </option>
   ));
+
+  const addDepartment = (
+    <Dialog variant="primary" trigger={<><Plus aria-hidden /> Add department</>} title="Add a department">
+      <ActionForm action={createDepartmentAction} className="grid gap-4 sm:grid-cols-2">
+        <FormField name="code" label="Code" required hint="e.g. CHEM">
+          <Input id="department-code" name="code" maxLength={10} className="uppercase" />
+        </FormField>
+        <FormField name="name" label="Department name" required>
+          <Input id="department-name" name="name" maxLength={100} />
+        </FormField>
+        <DialogFooter className="sm:col-span-2"><DialogCancel /><SubmitButton pendingLabel="Saving…">Add department</SubmitButton></DialogFooter>
+      </ActionForm>
+    </Dialog>
+  );
+
+  const addClub = (
+    <Dialog variant="primary" trigger={<><Plus aria-hidden /> Add organisation</>} title="Add a campus organisation">
+      <ActionForm action={createClubAction} className="grid gap-4 sm:grid-cols-2">
+        <FormField name="name" label="Name" required className="sm:col-span-2">
+          <Input id="club-name" name="name" maxLength={100} />
+        </FormField>
+        <FormField name="category" label="Category" required>
+          <Input id="club-category" name="category" maxLength={60} placeholder="club" />
+        </FormField>
+        <FormField name="advisor" label="Advisor">
+          <Input id="club-advisor" name="advisor" maxLength={100} />
+        </FormField>
+        <DialogFooter className="sm:col-span-2"><DialogCancel /><SubmitButton pendingLabel="Saving…">Add organisation</SubmitButton></DialogFooter>
+      </ActionForm>
+    </Dialog>
+  );
 
   const addCourse = (
     <Dialog
@@ -42,8 +73,8 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
         <FormField name="code" label="Course code" required hint="e.g. CS210 or CS210L">
           <Input id="code" name="code" maxLength={8} className="uppercase" />
         </FormField>
-        <FormField name="credits" label="Credits" required>
-          <Input id="credits" name="credits" type="number" min={1} max={6} defaultValue={3} />
+        <FormField name="credits" label="Weekly units" required>
+          <Input id="credits" name="credits" type="number" min={1} max={12} defaultValue={3} />
         </FormField>
         <FormField name="title" label="Title" required className="sm:col-span-2">
           <Input id="title" name="title" maxLength={80} />
@@ -54,13 +85,27 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
             {deptOptions}
           </Select>
         </FormField>
-        <FormField name="kind" label="Delivery" required>
+        <FormField name="year" label="Year" required>
+          <Input id="year" name="year" type="number" min={1} max={5} defaultValue={1} />
+        </FormField>
+        <FormField name="kind" label="Primary delivery" required>
           <Select id="kind" name="kind" defaultValue="lecture">
             <option value="lecture">Lecture</option>
             <option value="lab">Lab (3-hour P2/P6 blocks)</option>
             <option value="tutorial">Tutorial</option>
           </Select>
         </FormField>
+        <div className="grid grid-cols-3 gap-3 sm:col-span-2">
+          <FormField name="lectureHours" label="Lecture hours">
+            <Input id="lectureHours" name="lectureHours" type="number" min={0} max={12} defaultValue={3} />
+          </FormField>
+          <FormField name="tutorialHours" label="Tutorial hours">
+            <Input id="tutorialHours" name="tutorialHours" type="number" min={0} max={12} defaultValue={0} />
+          </FormField>
+          <FormField name="labBlocks" label="Lab blocks">
+            <Input id="labBlocks" name="labBlocks" type="number" min={0} max={12} defaultValue={0} />
+          </FormField>
+        </div>
         <DialogFooter className="sm:col-span-2">
           <DialogCancel />
           <SubmitButton pendingLabel="Saving…">Add course</SubmitButton>
@@ -98,6 +143,10 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
         <FormField name="year" label="Year" required>
           <Input id="year" name="year" type="number" min={1} max={5} defaultValue={1} />
         </FormField>
+        <label className="flex items-center gap-2 text-sm text-ink sm:col-span-2">
+          <input type="checkbox" name="needsAccessible" className="size-4 accent-brand-600" />
+          This group requires accessible rooms
+        </label>
         <DialogFooter className="sm:col-span-2">
           <DialogCancel />
           <SubmitButton pendingLabel="Saving…">Add group</SubmitButton>
@@ -142,6 +191,15 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
         <FormField name="sessionsPerWeek" label="Sessions per week" required>
           <Input id="sessionsPerWeek" name="sessionsPerWeek" type="number" min={1} max={6} defaultValue={3} />
         </FormField>
+        <FormField name="expectedSize" label="Expected attendance" hint="Optional; useful for elective baskets.">
+          <Input id="expectedSize" name="expectedSize" type="number" min={1} max={2000} />
+        </FormField>
+        <FormField name="basketSlot" label="Elective basket" hint="Use the same code to synchronize choices.">
+          <Input id="basketSlot" name="basketSlot" maxLength={40} placeholder="e.g. OEB-4" />
+        </FormField>
+        <label className="flex items-center gap-2 self-end pb-2 text-sm text-ink">
+          <input type="checkbox" name="needsAccessible" className="size-4 accent-brand-600" /> Accessible room required
+        </label>
         <FormField name="groupIds" label="Student groups" required className="sm:col-span-2" htmlFor="groupIds-0">
           <div className="grid gap-2 sm:grid-cols-3">
             {ref.groups.map((g, i) => (
@@ -163,10 +221,12 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
 
   const tabs = [
     { key: "overview", label: "Overview" },
+    { key: "departments", label: "Departments", count: ref.departments.length },
     { key: "courses", label: "Courses", count: ref.courses.length },
     { key: "groups", label: "Student groups", count: ref.groups.length },
     { key: "offerings", label: "Teaching assignments", count: ref.offerings.length },
     { key: "faculty", label: "Faculty", count: ref.faculty.length },
+    { key: "clubs", label: "Organisations", count: ref.clubs.length },
   ];
 
   return (
@@ -175,7 +235,7 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
         eyebrow="Academics"
         title="Academic Management"
         description="Departments, courses, student groups and teaching assignments that drive timetable generation."
-        actions={tab === "courses" ? addCourse : tab === "groups" ? addGroup : tab === "offerings" ? addOffering : undefined}
+        actions={tab === "departments" ? addDepartment : tab === "courses" ? addCourse : tab === "groups" ? addGroup : tab === "offerings" ? addOffering : tab === "clubs" ? addClub : undefined}
       />
       <TabLinks
         label="Academic data"
@@ -229,6 +289,28 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
         </>
       )}
 
+      {tab === "departments" && (
+        <Card>
+          <CardHeader title="Departments" description={`${ref.departments.length} academic and administrative units`} />
+          <TableWrap>
+            <Table>
+              <THead><tr><TH>Code</TH><TH>Name</TH><TH className="text-right">Faculty</TH><TH className="text-right">Courses</TH><TH className="text-right">Groups</TH></tr></THead>
+              <tbody>
+                {ref.departments.map((department) => (
+                  <TR key={department.id}>
+                    <TD className="font-semibold">{department.code}</TD>
+                    <TD>{department.name}</TD>
+                    <TD className="tabular text-right">{ref.faculty.filter((faculty) => faculty.departmentId === department.id).length}</TD>
+                    <TD className="tabular text-right">{ref.courses.filter((course) => course.departmentId === department.id).length}</TD>
+                    <TD className="tabular text-right">{ref.groups.filter((group) => group.departmentId === department.id).length}</TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          </TableWrap>
+        </Card>
+      )}
+
       {tab === "courses" && (
         <Card>
           <CardHeader title="Course catalogue" description={plural(ref.courses.length, "course")} />
@@ -240,7 +322,9 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
                   <TH>Title</TH>
                   <TH>Department</TH>
                   <TH>Delivery</TH>
-                  <TH className="text-right">Credits</TH>
+                  <TH className="text-right">Year</TH>
+                  <TH className="text-right">L/T/P</TH>
+                  <TH className="text-right">Weekly units</TH>
                   <TH className="text-right">Assignments</TH>
                 </tr>
               </THead>
@@ -253,6 +337,8 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
                     <TD>
                       <Badge tone="outline">{KIND_LABEL[c.kind]}</Badge>
                     </TD>
+                    <TD className="tabular text-right">{c.year ?? "—"}</TD>
+                    <TD className="tabular text-right">{c.lectureHours}/{c.tutorialHours}/{c.labBlocks}</TD>
                     <TD className="tabular text-right">{c.credits}</TD>
                     <TD className="tabular text-right">{ref.offerings.filter((o) => o.courseId === c.id).length}</TD>
                   </TR>
@@ -282,7 +368,10 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
                 {ref.groups.map((g) => (
                   <TR key={g.id}>
                     <TD className="font-semibold">{g.code}</TD>
-                    <TD>{g.name}</TD>
+                    <TD>
+                      {g.name}
+                      {g.needsAccessible ? <Badge tone="info">Accessible</Badge> : null}
+                    </TD>
                     <TD className="text-ink-2">{ref.deptMap.get(g.departmentId)?.code}</TD>
                     <TD className="tabular text-right">{g.year}</TD>
                     <TD className="tabular text-right">{g.size}</TD>
@@ -335,6 +424,8 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
                         </TD>
                         <TD className="text-ink-2">
                           {o.sessionsPerWeek} × {plural(o.duration, "period")} · {KIND_LABEL[o.kind]}
+                          {o.expectedSize ? <span className="block text-xs">{o.expectedSize} expected</span> : null}
+                          {o.basketSlot ? <Badge tone="info">Basket {o.basketSlot}</Badge> : null}
                         </TD>
                         <TD className="text-ink-2">{ROOM_TYPE_LABEL[o.roomType]}</TD>
                         <TD>
@@ -378,16 +469,21 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
                   <TH>Department</TH>
                   <TH>Designation</TH>
                   <TH className="w-56">Weekly load</TH>
-                  <TH className="text-right">Blocked slots</TH>
+                  <TH className="text-right">Daily limit</TH>
+                  <TH className="text-right">Constraints</TH>
                 </tr>
               </THead>
               <tbody>
                 {ref.faculty.map((f) => {
                   const load = tt?.facultyLoad.get(f.id) ?? 0;
                   const blocked = tt?.state.blockRows.filter((b) => b.facultyId === f.id).length ?? 0;
+                  const preferences = tt?.state.preferenceRows.filter((p) => p.facultyId === f.id).length ?? 0;
                   return (
                     <TR key={f.id}>
-                      <TD className="font-medium">{f.name}</TD>
+                      <TD className="font-medium">
+                        {f.name}
+                        {f.sourceId ? <span className="ml-2 font-mono text-[11px] text-ink-3">{f.sourceId}</span> : null}
+                      </TD>
                       <TD className="text-ink-2">{f.departmentId ? ref.deptMap.get(f.departmentId)?.code : "—"}</TD>
                       <TD className="text-ink-2">{f.title}</TD>
                       <TD>
@@ -398,10 +494,35 @@ export default async function AcademicsPage({ searchParams }: { searchParams: Se
                           </span>
                         </div>
                       </TD>
-                      <TD className="tabular text-right">{blocked}</TD>
+                      <TD className="tabular text-right">{f.maxHoursPerDay ?? "—"}</TD>
+                      <TD className="tabular text-right">
+                        {blocked} blocked · {preferences} preferred
+                        {f.needsAccessible ? <span className="block text-xs text-brand-700">Accessible rooms</span> : null}
+                      </TD>
                     </TR>
                   );
                 })}
+              </tbody>
+            </Table>
+          </TableWrap>
+        </Card>
+      )}
+
+      {tab === "clubs" && (
+        <Card>
+          <CardHeader title="Campus organisations" description={`${ref.clubs.length} organisations available to booking representatives`} />
+          <TableWrap>
+            <Table>
+              <THead><tr><TH>Name</TH><TH>Category</TH><TH>Advisor</TH><TH className="text-right">Representatives</TH></tr></THead>
+              <tbody>
+                {ref.clubs.map((club) => (
+                  <TR key={club.id}>
+                    <TD className="font-semibold">{club.name}</TD>
+                    <TD className="text-ink-2">{club.category}</TD>
+                    <TD className="text-ink-2">{club.advisor ?? "—"}</TD>
+                    <TD className="tabular text-right">{ref.people.filter((person) => person.clubId === club.id).length}</TD>
+                  </TR>
+                ))}
               </tbody>
             </Table>
           </TableWrap>

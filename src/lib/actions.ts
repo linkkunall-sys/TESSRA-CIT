@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
@@ -9,7 +9,8 @@ import { respond } from "./assistant";
 import { endSession, requireRole, requireUser } from "./auth";
 import { hashPassword } from "./password";
 import { findAlternatives } from "./scheduler";
-import { BOOKING_CATEGORIES, BOOKING_NEEDS, DAY_SHORT, ROOM_FEATURES, type ChangeType, type Priority, type RoomStatus, type RoomType, type SessionKind } from "./constants";
+import { restoreCitOperationalData } from "./seed";
+import { BOOKING_CATEGORIES, BOOKING_NEEDS, DAY_SHORT, ROOM_FEATURES, roomSupportsBookingNeed, type ChangeType, type Priority, type RoomStatus, type RoomType, type SessionKind } from "./constants";
 import {
   applyDisruptionPlan,
   audit,
@@ -107,23 +108,72 @@ export async function toggleFixedAction(_prev: ActionState, fd: FormData): Promi
 }
 
 /* ============================== Academics ============================= */
+export async function createDepartmentAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireRole("admin");
+  const code = str(fd, "code").toUpperCase();
+  const name = str(fd, "name");
+  const errors: Record<string, string> = {};
+  if (!/^[A-Z0-9]{2,10}$/.test(code)) errors.code = "Use 2–10 letters or digits";
+  if (name.length < 2) errors.name = "Enter a department name";
+  if (Object.keys(errors).length) return fail("Please fix the highlighted fields.", errors);
+  const [duplicate] = await db.select({ id: t.departments.id }).from(t.departments).where(eq(t.departments.code, code));
+  if (duplicate) return fail("A department with this code already exists.", { code: "Code already in use" });
+  const [department] = await db.insert(t.departments).values({ code, name }).returning();
+  await audit(user.id, "department.created", "academics", department.id, `Added department ${code} · ${name}`);
+  refresh();
+  return ok(`Department ${code} added.`);
+}
+
+export async function createClubAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireRole("admin");
+  const name = str(fd, "name");
+  const category = str(fd, "category");
+  const advisor = str(fd, "advisor") || null;
+  const errors: Record<string, string> = {};
+  if (name.length < 2) errors.name = "Enter an organisation name";
+  if (category.length < 2) errors.category = "Enter a category";
+  if (Object.keys(errors).length) return fail("Please fix the highlighted fields.", errors);
+  const [duplicate] = await db.select({ id: t.clubs.id }).from(t.clubs).where(eq(t.clubs.name, name));
+  if (duplicate) return fail("An organisation with this name already exists.", { name: "Name already in use" });
+  const [club] = await db.insert(t.clubs).values({ name, category, advisor }).returning();
+  await audit(user.id, "club.created", "academics", club.id, `Added campus organisation ${name}`);
+  refresh();
+  return ok(`${name} added.`);
+}
+
 export async function createCourseAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireRole("admin");
   const code = str(fd, "code").toUpperCase();
   const title = str(fd, "title");
   const departmentId = num(fd, "departmentId");
   const credits = num(fd, "credits");
+  const year = num(fd, "year");
+  const lectureHours = num(fd, "lectureHours") ?? 0;
+  const tutorialHours = num(fd, "tutorialHours") ?? 0;
+  const labBlocks = num(fd, "labBlocks") ?? 0;
   const kind = str(fd, "kind") as SessionKind;
   const errors: Record<string, string> = {};
   if (!/^[A-Z]{2,4}\d{3}[A-Z]?$/.test(code)) errors.code = "Use a code like CS210 or CS210L";
   if (title.length < 3) errors.title = "Enter a course title";
   if (!departmentId) errors.departmentId = "Select a department";
-  if (!credits || credits < 1 || credits > 6) errors.credits = "Credits must be between 1 and 6";
+  if (!credits || !Number.isInteger(credits) || credits < 1 || credits > 12) errors.credits = "Weekly units must be a whole number from 1 to 12";
+  if (!year || !Number.isInteger(year) || year < 1 || year > 5) errors.year = "Year must be a whole number from 1 to 5";
+  if ([lectureHours, tutorialHours, labBlocks].some((value) => !Number.isInteger(value) || value < 0 || value > 12)) errors.lectureHours = "Contact structure must use whole numbers from 0 to 12";
   if (!["lecture", "lab", "tutorial"].includes(kind)) errors.kind = "Select a delivery type";
   if (Object.keys(errors).length) return fail("Please fix the highlighted fields.", errors);
   const [dupe] = await db.select({ id: t.courses.id }).from(t.courses).where(eq(t.courses.code, code));
   if (dupe) return fail("A course with this code already exists.", { code: "Code already in use" });
-  const [c] = await db.insert(t.courses).values({ code, title, departmentId: departmentId as number, credits: credits as number, kind }).returning();
+  const [c] = await db.insert(t.courses).values({
+    code,
+    title,
+    departmentId: departmentId as number,
+    credits: credits as number,
+    kind,
+    year: year as number,
+    lectureHours,
+    tutorialHours,
+    labBlocks,
+  }).returning();
   await audit(user.id, "course.created", "academics", c.id, `Added course ${code} ${title}`);
   refresh();
   return ok(`Course ${code} added.`);
@@ -140,12 +190,19 @@ export async function createGroupAction(_prev: ActionState, fd: FormData): Promi
   if (!/^[A-Z]{2,5}-\d[A-Z]?$/.test(code)) errors.code = "Use a code like CSE-2C";
   if (name.length < 3) errors.name = "Enter a descriptive name";
   if (!departmentId) errors.departmentId = "Select a department";
-  if (!year || year < 1 || year > 5) errors.year = "Year must be 1–5";
-  if (!size || size < 5 || size > 300) errors.size = "Size must be 5–300";
+  if (!year || !Number.isInteger(year) || year < 1 || year > 5) errors.year = "Year must be a whole number from 1 to 5";
+  if (!size || !Number.isInteger(size) || size < 5 || size > 300) errors.size = "Size must be a whole number from 5 to 300";
   if (Object.keys(errors).length) return fail("Please fix the highlighted fields.", errors);
   const [dupe] = await db.select({ id: t.studentGroups.id }).from(t.studentGroups).where(eq(t.studentGroups.code, code));
   if (dupe) return fail("A group with this code already exists.", { code: "Code already in use" });
-  const [g] = await db.insert(t.studentGroups).values({ code, name, departmentId: departmentId as number, year: year as number, size: size as number }).returning();
+  const [g] = await db.insert(t.studentGroups).values({
+    code,
+    name,
+    departmentId: departmentId as number,
+    year: year as number,
+    size: size as number,
+    needsAccessible: fd.get("needsAccessible") === "on",
+  }).returning();
   await audit(user.id, "group.created", "academics", g.id, `Added student group ${code} (${size} students)`);
   refresh();
   return ok(`Group ${code} added.`);
@@ -155,21 +212,51 @@ export async function createOfferingAction(_prev: ActionState, fd: FormData): Pr
   const user = await requireRole("admin");
   const courseId = num(fd, "courseId");
   const facultyId = num(fd, "facultyId");
-  const groupIds = ids(fd, "groupIds");
+  const groupIds = [...new Set(ids(fd, "groupIds"))];
   const sessionsPerWeek = num(fd, "sessionsPerWeek");
+  const expectedSize = num(fd, "expectedSize");
+  const basketSlot = str(fd, "basketSlot") || null;
   const errors: Record<string, string> = {};
   if (!courseId) errors.courseId = "Select a course";
   if (!facultyId) errors.facultyId = "Select a faculty member";
   if (!groupIds.length) errors.groupIds = "Select at least one group";
-  if (!sessionsPerWeek || sessionsPerWeek < 1 || sessionsPerWeek > 6) errors.sessionsPerWeek = "Between 1 and 6 sessions";
+  if (!sessionsPerWeek || !Number.isInteger(sessionsPerWeek) || sessionsPerWeek < 1 || sessionsPerWeek > 6) errors.sessionsPerWeek = "Use a whole number from 1 to 6";
+  if (expectedSize !== null && (!Number.isInteger(expectedSize) || expectedSize < 1 || expectedSize > 2000)) errors.expectedSize = "Expected attendance must be a whole number from 1 to 2000";
+  if (basketSlot && basketSlot.length > 40) errors.basketSlot = "Basket code must be 40 characters or fewer";
   if (Object.keys(errors).length) return fail("Please fix the highlighted fields.", errors);
-  const [course] = await db.select().from(t.courses).where(eq(t.courses.id, courseId as number));
-  const [faculty] = await db.select().from(t.users).where(and(eq(t.users.id, facultyId as number), eq(t.users.role, "faculty")));
+  const [[course], [faculty], selectedGroups, roomRows] = await Promise.all([
+    db.select().from(t.courses).where(eq(t.courses.id, courseId as number)),
+    db.select().from(t.users).where(and(eq(t.users.id, facultyId as number), eq(t.users.role, "faculty"))),
+    db.select().from(t.studentGroups).where(inArray(t.studentGroups.id, groupIds)),
+    db.select().from(t.rooms),
+  ]);
   if (!course || !faculty) return fail("Course or faculty not found.");
+  if (selectedGroups.length !== groupIds.length) return fail("One or more student groups no longer exist.", { groupIds: "Choose valid groups" });
+  const attendance = expectedSize ?? selectedGroups.reduce((sum, group) => sum + group.size, 0);
+  const needsAccessible = fd.get("needsAccessible") === "on" || faculty.needsAccessible || selectedGroups.some((group) => group.needsAccessible);
+  const requiredUse = course.kind === "lab" ? "lab" : course.kind === "tutorial" ? "tutorial" : "lecture";
+  const allowedRoomIds = roomRows
+    .filter((room) => room.allowedUses.includes(requiredUse) && room.capacity >= attendance && (!needsAccessible || room.accessible))
+    .map((room) => room.id);
+  if (!allowedRoomIds.length) {
+    return fail("No CIT venue satisfies this assignment's use, capacity, and accessibility requirements.", { expectedSize: "Adjust attendance or add an eligible venue" });
+  }
   const roomType: RoomType = course.kind === "lab" ? "lab" : groupIds.length > 1 ? "auditorium" : course.kind === "tutorial" ? "seminar" : "lecture";
   const [o] = await db
     .insert(t.offerings)
-    .values({ courseId: course.id, facultyId: faculty.id, groupIds, sessionsPerWeek: sessionsPerWeek as number, duration: course.kind === "lab" ? 3 : 1, kind: course.kind, roomType })
+    .values({
+      courseId: course.id,
+      facultyId: faculty.id,
+      groupIds,
+      expectedSize: attendance,
+      sessionsPerWeek: sessionsPerWeek as number,
+      duration: course.kind === "lab" ? 3 : 1,
+      kind: course.kind,
+      roomType,
+      allowedRoomIds,
+      basketSlot,
+      needsAccessible,
+    })
     .returning();
   await audit(user.id, "offering.created", "academics", o.id, `Assigned ${course.code} to ${faculty.name} (${sessionsPerWeek}×/week)`);
   refresh();
@@ -201,13 +288,24 @@ export async function createRoomAction(_prev: ActionState, fd: FormData): Promis
   if (name.length < 3) errors.name = "Enter a venue name";
   if (building.length < 2) errors.building = "Enter the building";
   if (!["lecture", "lab", "seminar", "auditorium", "exam_hall", "outdoor"].includes(type)) errors.type = "Select a venue type";
-  if (!capacity || capacity < 5 || capacity > 2000) errors.capacity = "Capacity must be 5–2000";
+  if (!capacity || !Number.isInteger(capacity) || capacity < 5 || capacity > 2000) errors.capacity = "Capacity must be a whole number from 5 to 2000";
   if (Object.keys(errors).length) return fail("Please fix the highlighted fields.", errors);
   const [dupe] = await db.select({ id: t.rooms.id }).from(t.rooms).where(eq(t.rooms.code, code));
   if (dupe) return fail("A venue with this code already exists.", { code: "Code already in use" });
+  const bookable = fd.get("bookable") === "on";
+  const allowedUses = type === "lab"
+    ? ["lab"]
+    : type === "outdoor"
+      ? []
+      : type === "exam_hall"
+        ? ["exam"]
+        : type === "seminar"
+          ? ["tutorial", "exam"]
+          : ["lecture", "tutorial", "exam"];
+  if (bookable) allowedUses.push("event");
   const [r] = await db
     .insert(t.rooms)
-    .values({ code, name, building, type, capacity: capacity as number, features, accessible: fd.get("accessible") === "on", bookable: fd.get("bookable") === "on" })
+    .values({ code, name, building, type, capacity: capacity as number, features, allowedUses, accessible: fd.get("accessible") === "on", bookable })
     .returning();
   await audit(user.id, "room.created", "room", r.id, `Added venue ${code} (${capacity} seats)`);
   refresh();
@@ -246,35 +344,56 @@ export async function updateRoomStatusAction(_prev: ActionState, fd: FormData): 
 export async function saveExamAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireRole("admin");
   const id = num(fd, "id");
-  const courseId = num(fd, "courseId");
-  const groupIds = ids(fd, "groupIds");
+  const primaryCourseId = num(fd, "courseId");
+  const selectedCourseIds = ids(fd, "courseIds");
+  const courseIds = [...new Set([...selectedCourseIds, ...(primaryCourseId ? [primaryCourseId] : [])])];
+  const courseId = courseIds[0];
+  const groupIds = [...new Set(ids(fd, "groupIds"))];
   const date = str(fd, "date");
   const startTime = str(fd, "startTime");
   const endTime = str(fd, "endTime");
-  const roomId = num(fd, "roomId");
+  const primaryRoomId = num(fd, "roomId");
+  const selectedRoomIds = ids(fd, "roomIds");
+  const roomIds = [...new Set([...selectedRoomIds, ...(primaryRoomId ? [primaryRoomId] : [])])];
+  const roomId = roomIds[0];
   const invigilatorId = num(fd, "invigilatorId");
   let candidates = num(fd, "candidates");
   const errors: Record<string, string> = {};
-  if (!courseId) errors.courseId = "Select a course";
+  if (!courseId) errors.courseIds = "Select at least one course";
   if (!groupIds.length) errors.groupIds = "Select at least one group";
   if (!isIsoDate(date)) errors.date = "Choose a date";
   if (!isValidTime(startTime)) errors.startTime = "Use HH:MM";
   if (!isValidTime(endTime)) errors.endTime = "Use HH:MM";
   else if (isValidTime(startTime) && toMinutes(endTime) <= toMinutes(startTime)) errors.endTime = "End must be after start";
-  if (!roomId) errors.roomId = "Select a room";
+  if (!roomId) errors.roomIds = "Select at least one room";
+  if (candidates !== null && (!Number.isInteger(candidates) || candidates < 1 || candidates > 10000)) errors.candidates = "Candidates must be a whole number from 1 to 10,000";
   if (Object.keys(errors).length) return fail("Please fix the highlighted fields.", errors);
-  if (!candidates) {
-    const groups = await db.select().from(t.studentGroups).where(inArray(t.studentGroups.id, groupIds));
-    candidates = groups.reduce((n, g) => n + g.size, 0);
+
+  const [selectedCourses, selectedGroups, selectedRooms, selectedInvigilators] = await Promise.all([
+    db.select({ id: t.courses.id, code: t.courses.code }).from(t.courses).where(inArray(t.courses.id, courseIds)),
+    db.select({ id: t.studentGroups.id, size: t.studentGroups.size }).from(t.studentGroups).where(inArray(t.studentGroups.id, groupIds)),
+    db.select().from(t.rooms).where(inArray(t.rooms.id, roomIds)),
+    invigilatorId
+      ? db.select({ id: t.users.id }).from(t.users).where(and(eq(t.users.id, invigilatorId), eq(t.users.role, "faculty")))
+      : Promise.resolve([]),
+  ]);
+  if (selectedCourses.length !== courseIds.length) return fail("One or more courses no longer exist.", { courseIds: "Choose valid courses" });
+  if (selectedGroups.length !== groupIds.length) return fail("One or more student groups no longer exist.", { groupIds: "Choose valid groups" });
+  if (selectedRooms.length !== roomIds.length) return fail("One or more rooms no longer exist.", { roomIds: "Choose valid rooms" });
+  if (selectedRooms.some((room) => room.status !== "active" || !room.allowedUses.includes("exam"))) {
+    return fail("Every examination room must be active and approved for exam use.", { roomIds: "Choose active exam-enabled rooms" });
   }
-  const values = { courseId: courseId as number, groupIds, date, startTime, endTime, roomId: roomId as number, invigilatorId: invigilatorId || null, candidates };
-  const [course] = await db.select({ code: t.courses.code }).from(t.courses).where(eq(t.courses.id, courseId as number));
+  if (invigilatorId && selectedInvigilators.length !== 1) return fail("Invigilator not found.", { invigilatorId: "Choose a current faculty member" });
+  if (!candidates) candidates = selectedGroups.reduce((sum, group) => sum + group.size, 0);
+  const values = { courseId: courseId as number, courseIds, groupIds, date, startTime, endTime, roomId: roomId as number, roomIds, invigilatorId: invigilatorId || null, candidates };
+  const courseLabel = selectedCourses.map((course) => course.code).join(" + ") || "exam";
   if (id) {
-    await db.update(t.exams).set(values).where(eq(t.exams.id, id));
-    await audit(user.id, "exam.updated", "exam", id, `Updated ${course?.code ?? "exam"} examination (${date} ${startTime})`);
+    const [updated] = await db.update(t.exams).set(values).where(eq(t.exams.id, id)).returning({ id: t.exams.id });
+    if (!updated) return fail("Examination not found.");
+    await audit(user.id, "exam.updated", "exam", id, `Updated ${courseLabel} examination (${date} ${startTime})`);
   } else {
     const [e] = await db.insert(t.exams).values(values).returning();
-    await audit(user.id, "exam.created", "exam", e.id, `Scheduled ${course?.code ?? "exam"} examination (${date} ${startTime})`);
+    await audit(user.id, "exam.created", "exam", e.id, `Scheduled ${courseLabel} examination (${date} ${startTime})`);
   }
   refresh();
   return ok(id ? "Examination updated. Validation has been re-run." : "Examination scheduled. Validation has been re-run.");
@@ -310,9 +429,7 @@ export async function createBookingAction(_prev: ActionState, fd: FormData): Pro
   const errors: Record<string, string> = {};
   const lead = user.role === "club" ? settings?.bookingLeadDays ?? 2 : 0;
   if (title.length < 3) errors.title = "Give the event a clear title";
-  const roleCategories = user.role === "club"
-    ? ["club_event", "workshop", "seminar", "meeting", "cultural", "sports"]
-    : ["department_event", "workshop", "seminar", "meeting"];
+  const roleCategories = user.role === "club" ? ["club_event"] : ["department_event"];
   if (!BOOKING_CATEGORIES.some((c) => c.value === category) || !roleCategories.includes(category)) {
     errors.category = "This category is not available to your role";
   }
@@ -327,20 +444,15 @@ export async function createBookingAction(_prev: ActionState, fd: FormData): Pro
     if (mins <= 0) errors.endTime = "End must be after start";
     else if (settings && mins > settings.maxBookingHours * 60) errors.endTime = `Bookings are limited to ${settings.maxBookingHours} hours`;
   }
-  if (!attendees || attendees < 1) errors.attendees = "Enter expected attendance";
+  if (!attendees || !Number.isInteger(attendees) || attendees < 1 || attendees > 10000) errors.attendees = "Enter a whole-number attendance from 1 to 10,000";
   if (Object.keys(errors).length) return fail("Please fix the highlighted fields.", errors);
 
   const [room] = await db.select().from(t.rooms).where(eq(t.rooms.id, roomId as number));
   if (!room) return fail("Venue not found.", { roomId: "Venue not found" });
-  if (user.role === "club" && !room.bookable && room.type !== "lab") return fail("This venue is not open to club bookings.", { roomId: "Not bookable by clubs" });
-  const features = new Set(room.features.map((feature) => feature.toLowerCase()));
-  const unsupported = needs.filter((need) => {
-    if (need === "Accessibility") return !room.accessible;
-    if (need === "Microphones") return !features.has("audio system");
-    if (need === "Wi-Fi access") return !features.has("wi-fi");
-    if (need === "Recording") return !features.has("recording") && !features.has("lecture capture");
-    return !features.has(need.toLowerCase());
-  });
+  if (!room.bookable && !room.allowedUses.includes("event")) {
+    return fail("This venue is not available for events.", { roomId: "Choose an event-enabled venue" });
+  }
+  const unsupported = needs.filter((need) => !roomSupportsBookingNeed(room.features, room.accessible, need));
   if (unsupported.length) {
     return fail(`${room.code} does not provide: ${unsupported.join(", ")}.`, { roomId: "Choose a venue with all requested facilities" });
   }
@@ -348,7 +460,11 @@ export async function createBookingAction(_prev: ActionState, fd: FormData): Pro
   const probe = { roomId: room.id, date, startTime, endTime, attendees: attendees as number };
   const blocking = analyzer.check(probe).filter((c) => c.severity === "error");
   if (blocking.length) {
-    const suggestions = analyzer.alternatives(probe, { bookableOnly: user.role === "club" }).map((r) => ({ id: r.id, code: r.code, name: r.name, capacity: r.capacity }));
+    const suggestions = analyzer
+      .alternatives(probe, { bookableOnly: user.role === "club", limit: 10 })
+      .filter((candidate) => needs.every((need) => roomSupportsBookingNeed(candidate.features, candidate.accessible, need)))
+      .slice(0, 3)
+      .map((candidate) => ({ id: candidate.id, code: candidate.code, name: candidate.name, capacity: candidate.capacity }));
     return fail(`${room.code} is not available: ${blocking[0].message}.`, { roomId: blocking.map((b) => b.message).join(" · ") }, { suggestions });
   }
   const autoApprove = user.role === "club" && settings && !settings.clubApprovalRequired;
@@ -791,7 +907,7 @@ export async function manualAddSessionAction(_prev: ActionState, fd: FormData): 
   const versionId = num(fd, "versionId");
   const courseId = num(fd, "courseId");
   const facultyId = num(fd, "facultyId");
-  const groupIds = ids(fd, "groupIds");
+  const groupIds = [...new Set(ids(fd, "groupIds"))];
   const day = num(fd, "day");
   const startPeriod = num(fd, "startPeriod");
   const roomId = num(fd, "roomId");
@@ -815,6 +931,7 @@ export async function manualAddSessionAction(_prev: ActionState, fd: FormData): 
   if (rule) return fail(rule, { startPeriod: rule });
 
   const state = await loadEngineState(version.id);
+  if (groupIds.some((groupId) => !state.groups.has(groupId))) return fail("One or more student groups no longer exist.", { groupIds: "Choose valid groups" });
   const draft: SessionDraft = { courseId: course.id, facultyId: faculty.id, groupIds, day: day as number, startPeriod: startPeriod as number, duration, kind };
   let room = roomId ? state.rooms.get(roomId) ?? null : null;
   if (roomId && !room) return fail("Room not found.", { roomId: "Room not found" });
@@ -832,7 +949,8 @@ export async function manualAddSessionAction(_prev: ActionState, fd: FormData): 
   const isFixed = fd.get("isFixed") === "on";
   const [row] = await db.insert(t.scheduledSessions).values({
     versionId: version.id, offeringId: null, courseId: course.id, facultyId: faculty.id, roomId: room.id,
-    groupIds, day: day as number, startPeriod: startPeriod as number, duration, kind, isFixed,
+    groupIds, expectedSize: groupIds.reduce((sum, groupId) => sum + (state.groups.get(groupId)?.size ?? 0), 0),
+    day: day as number, startPeriod: startPeriod as number, duration, kind, isFixed,
   }).returning();
   const where = `${DAY_SHORT[draft.day]} ${periodLabel(draft.startPeriod, duration)} · ${room.code}`;
   await audit(user.id, "session.added_manual", "schedule", row.id, `Manually scheduled ${course.code} for ${faculty.name} (${where})${isFixed ? " · pinned" : ""}`);
@@ -893,7 +1011,7 @@ export async function manualDeleteSessionAction(_prev: ActionState, fd: FormData
 /* ==================== Extra class requests (faculty → admin) ============== */
 async function requestExtraClass(user: { id: number; name: string }, fd: FormData): Promise<ActionState> {
   const courseId = num(fd, "courseId");
-  const groupIds = ids(fd, "groupIds");
+  const groupIds = [...new Set(ids(fd, "groupIds"))];
   const day = num(fd, "day");
   const startPeriod = num(fd, "startPeriod");
   const roomId = num(fd, "roomId");
@@ -974,7 +1092,8 @@ async function approveExtraClass(user: { id: number; role: string }, req: t.Chan
   }
   const [row] = await db.insert(t.scheduledSessions).values({
     versionId: pub.id, offeringId: null, courseId: draft.courseId, facultyId: draft.facultyId, roomId: room.id,
-    groupIds: draft.groupIds, day: draft.day, startPeriod: draft.startPeriod, duration: draft.duration, kind: draft.kind, isFixed: false,
+    groupIds: draft.groupIds, expectedSize: draft.groupIds.reduce((sum, groupId) => sum + (state.groups.get(groupId)?.size ?? 0), 0),
+    day: draft.day, startPeriod: draft.startPeriod, duration: draft.duration, kind: draft.kind, isFixed: false,
   }).returning();
   await db.update(t.changeRequests).set({ status: "approved", reviewerId: user.id, reviewNote: note, reviewedAt: new Date(), proposedRoomId: room.id }).where(eq(t.changeRequests.id, req.id));
   const where = `${DAY_SHORT[draft.day]} ${periodLabel(draft.startPeriod, draft.duration)} · ${room.code}`;
@@ -1047,7 +1166,7 @@ export async function rejectAccessRequestAction(_prev: ActionState, fd: FormData
 }
 
 /* ======================= Evaluation walkthrough data ====================== */
-/** Adds one real, conflict-free request when a clean demo has no approval work. */
+/** Adds one real, conflict-free CIT request when the approval queue is empty. */
 export async function prepareApprovalDemoAction(_prev: ActionState, _fd: FormData): Promise<ActionState> {
   const admin = await requireRole("admin");
   const [existing] = await db
@@ -1062,9 +1181,9 @@ export async function prepareApprovalDemoAction(_prev: ActionState, _fd: FormDat
   const [faculty] = await db
     .select({ id: t.users.id, name: t.users.name })
     .from(t.users)
-    .where(eq(t.users.email, "ananya.rao@westbrook.edu"))
+    .where(eq(t.users.email, "f01@cit.ac.in"))
     .limit(1);
-  if (!faculty) return fail("The demo faculty account is unavailable.");
+  if (!faculty) return fail("The CIT faculty walkthrough account is unavailable.");
 
   const state = await loadEngineState(version.id);
   let selected: (typeof state.sessions)[number] | undefined;
@@ -1077,7 +1196,7 @@ export async function prepareApprovalDemoAction(_prev: ActionState, _fd: FormDat
       break;
     }
   }
-  if (!selected || !alternative) return fail("No safe alternative could be prepared for the walkthrough. Regenerate the demo timetable and retry.");
+  if (!selected || !alternative) return fail("No safe alternative could be prepared for the walkthrough. Regenerate the CIT timetable and retry.");
 
   const [request] = await db
     .insert(t.changeRequests)
@@ -1098,108 +1217,23 @@ export async function prepareApprovalDemoAction(_prev: ActionState, _fd: FormDat
       },
     })
     .returning();
-  await notify(faculty.id, "Demo change request prepared", "A validated reschedule request is ready for Admin review.", "info", "/faculty/requests");
-  await audit(admin.id, "demo.approval_prepared", "change_request", request.id, `Prepared a conflict-free ${request.snapshot?.courseCode ?? "class"} reschedule for the approval walkthrough`);
+  await notify(faculty.id, "CIT change request prepared", "A validated reschedule request is ready for Admin review.", "info", "/faculty/requests");
+  await audit(admin.id, "cit.approval_prepared", "change_request", request.id, `Prepared a conflict-free ${request.snapshot?.courseCode ?? "class"} reschedule for the approval walkthrough`);
   refresh();
   return ok("Approval example ready. Review its before/after placement and approve or reject it.");
 }
 
-/* ============================ Reset demo data =========================== */
+/* ============================ Restore CIT baseline ===================== */
 export async function resetDemoDataAction(_prev: ActionState, _fd: FormData): Promise<ActionState> {
   const user = await requireRole("admin");
-
-  /*
-   * Keep identity and reference data (accounts, departments, clubs, rooms,
-   * groups, courses, offerings and exams), plus auth sessions so the judge who
-   * pressed the button is not signed out. Clear mutable demo activity and reset
-   * policy/availability/room state before producing a fresh timetable.
-   *
-   * The old published timetable remains available until the replacement has
-   * been generated completely. If generation fails, judges are never left with
-   * an empty application.
-   */
-  await db.transaction(async (tx) => {
-    await tx.delete(t.assistantMessages);
-    await tx.delete(t.notifications);
-    await tx.delete(t.disruptions);
-    await tx.delete(t.changeRequests);
-    await tx.delete(t.bookings);
-    await tx.delete(t.accessRequests);
-    await tx.delete(t.passwordResetTokens);
-    await tx.delete(t.officialRuns);
-    await tx.delete(t.assignments);
-    await tx.delete(t.courseResources);
-    await tx.delete(t.syllabusUnits);
-    await tx.delete(t.auditLogs);
-    await tx.delete(t.availabilityBlocks);
-
-    await tx
-      .update(t.settings)
-      .set({
-        institutionName: "Westbrook Institute of Technology",
-        academicTerm: "Autumn Term 2026",
-        bookingLeadDays: 2,
-        maxBookingHours: 6,
-        clubApprovalRequired: true,
-        allowWeekendBookings: true,
-        updatedAt: new Date(),
-      })
-      .where(eq(t.settings.id, 1));
-    await tx.update(t.rooms).set({ status: "active", maintenanceNote: null });
-    await tx.update(t.scheduledSessions).set({ isFixed: false });
-
-    const faculty = await tx
-      .select({ id: t.users.id, email: t.users.email })
-      .from(t.users)
-      .where(eq(t.users.role, "faculty"));
-    const byEmail = new Map(faculty.map((f) => [f.email, f.id]));
-    const baseline = [
-      ["ananya.rao@westbrook.edu", 4, [7, 8], "Research group meeting"],
-      ["rahul.verma@westbrook.edu", 0, [1, 2], "Academic council"],
-      ["suresh.pillai@westbrook.edu", 2, [5, 6, 7, 8], "External examiner duty"],
-      ["neha.kulkarni@westbrook.edu", 3, [1, 2], "PhD coursework"],
-      ["laura.mendes@westbrook.edu", 1, [7, 8], "Industry advisory board"],
-    ] as const;
-    const blocks: (typeof t.availabilityBlocks.$inferInsert)[] = [];
-    for (const [email, day, periods, reason] of baseline) {
-      const facultyId = byEmail.get(email);
-      if (!facultyId) continue;
-      for (const period of periods) blocks.push({ facultyId, day, period, reason });
-    }
-    if (blocks.length) await tx.insert(t.availabilityBlocks).values(blocks);
-  });
-
-  const { version, stats } = await generateVersion(user.id, "Clean demo reset — freshly generated timetable");
-  if (stats.placedUnits !== stats.requiredUnits || stats.placedPeriods !== stats.requiredPeriods) {
-    await db.delete(t.scheduleVersions).where(eq(t.scheduleVersions.id, version.id));
-    return fail(
-      `Reset stopped safely: the replacement timetable placed ${stats.placedUnits}/${stats.requiredUnits} sessions. The previous published timetable is still active.`,
-    );
+  try {
+    const restored = await restoreCitOperationalData(user.id);
+    refresh();
+    return ok(`CIT baseline restored: ${restored.sessions} timetable sessions, ${restored.bookings} booking requests, and ${restored.exams} examinations.`);
+  } catch (error) {
+    console.error("CIT baseline restore failed", error);
+    return fail("The CIT baseline could not be restored. No partial reset was committed.");
   }
-
-  const sessions = await db
-    .select({ id: t.scheduledSessions.id })
-    .from(t.scheduledSessions)
-    .where(eq(t.scheduledSessions.versionId, version.id))
-    .limit(2);
-  if (sessions.length) {
-    await db
-      .update(t.scheduledSessions)
-      .set({ isFixed: true })
-      .where(inArray(t.scheduledSessions.id, sessions.map((s) => s.id)));
-  }
-
-  await publishVersion(version.id);
-  await db.delete(t.scheduleVersions).where(ne(t.scheduleVersions.id, version.id));
-  await audit(
-    user.id,
-    "demo_data.reset",
-    "system",
-    version.id,
-    `Reset mutable demo data and generated ${stats.placedUnits}/${stats.requiredUnits} sessions`,
-  );
-  refresh();
-  return ok(`Clean demo restored. Fresh timetable generated with all ${stats.requiredUnits} sessions.`);
 }
 
 /* ============================ Password reset =========================== */

@@ -328,7 +328,7 @@ export default async function OfficialPage({ searchParams }: { searchParams: Sea
       <PageHeader
         eyebrow={`Crunch Week · ${data.institute} · ${data.dataset_id}`}
         title="Official Dataset (CIT)"
-        description="The untouched official starter-pack dataset, solved by the OR-Tools CP-SAT engine and graded by the organisers' own validator. Exports are produced by the app, never by hand."
+        description="The canonical CIT source behind every role workspace: directly editable operational records plus the untouched starter pack, OR-Tools CP-SAT solver, and organisers’ validator for reproducible exports."
         actions={generateBtn}
         meta={
           <>

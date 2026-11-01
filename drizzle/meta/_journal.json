@@ -8,6 +8,27 @@
       "when": 1793461924874,
       "tag": "0000_supabase_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793492078318,
+      "tag": "0001_cit_operational",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793492684579,
+      "tag": "0002_source_requester",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793493456064,
+      "tag": "0003_source_requester_role",
+      "breakpoints": true
     }
   ]
 }

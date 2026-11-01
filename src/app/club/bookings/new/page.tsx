@@ -15,7 +15,7 @@ export default async function NewBookingPage({ searchParams }: { searchParams: S
   const get = await readParams(searchParams);
   const [ref, settings] = await Promise.all([getRef(), getSettings()]);
   const venues = ref.rooms
-    .filter((r) => r.bookable || r.type === "lab")
+    .filter((room) => room.bookable || room.allowedUses.includes("event"))
     .map((r) => ({ id: r.id, code: r.code, name: r.name, capacity: r.capacity, type: r.type, building: r.building, status: r.status }));
   const room = Number(get("room"));
   const date = get("date") ?? "";

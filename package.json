@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test:parser": "tsx --test src/lib/booking-parser.test.ts",
     "test:official-input": "tsx --test src/lib/official-disruption.test.ts",
-    "test:unit": "tsx --test src/lib/booking-parser.test.ts src/lib/calendar.test.ts src/lib/explanations.test.ts src/lib/llm.test.ts src/lib/nav.test.ts src/lib/official-disruption.test.ts"
+    "test:unit": "tsx --test src/lib/booking-parser.test.ts src/lib/calendar.test.ts src/lib/cit-operational.test.ts src/lib/explanations.test.ts src/lib/llm.test.ts src/lib/nav.test.ts src/lib/official-disruption.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

@@ -1,90 +1,110 @@
-# TESSRA — Deployment Guide
+# TESSRA CIT — Deployment Guide
 
-## Current production
+## Current status
 
-- Web application: `https://tessra-five.vercel.app`
-- Database/authentication: hosted PostgreSQL + Supabase Auth
-- Scheduling runtime: private Vercel Python Service (`engine/`) bound to the Next.js service as `ENGINE_URL`
-- Deployment definition: root `vercel.json`
+The CIT application is validated and prepared for source delivery, but **no CIT production deployment is configured yet**. This is intentional: the application is committed and pushed before any new database or deployment credentials are requested.
 
-The production judge path has been executed successfully: Admin reset → `/admin/official` → **Generate schedule** → 189/189 sessions and 41/41 exams → byte-identical official validator → 0 hard violations → downloadable JSON.
+Do not point this repository at the frozen original TESSRA database or Vercel project. TESSRA CIT requires separate infrastructure.
 
-## Vercel Services architecture
+## Target architecture
 
-`vercel.json` deploys two services together:
+`vercel.json` defines two services:
 
 1. `web` — the public Next.js application.
-2. `engine` — a private FastAPI service with pinned OR-Tools dependencies.
+2. `engine` — the private FastAPI/OR-Tools service.
 
-A service binding injects the private engine URL into the web service as `ENGINE_URL`; it does not need to be exposed publicly. `runOfficialPipeline` calls `/solve-validated`, which returns both the generated schedule and the official-validator report.
+The private service binding supplies `ENGINE_URL` to the web service. `src/lib/official.ts` calls `/solve-validated`, which returns both an official-format schedule and the organiser-validator report. `engine/official_validator.py` is byte-identical to the untouched starter-pack validator.
 
-The deployed copy at `engine/official_validator.py` is byte-identical to the untouched organiser file at `official/starterpack/CrunchWeek_StarterPack/validator.py`. A regression test enforces that equality. The service health response also publishes the validator SHA-256 fingerprint.
+## Prerequisites
 
-## Production deployment
+- Node.js 22+
+- PostgreSQL (a separate empty CIT database)
+- Supabase project if hosted Auth is enabled
+- Vercel project with Services support, or equivalent web + private Python hosting
 
-1. Import the public GitHub repository into Vercel with the repository root as the project root.
-2. Use the **Services** framework preset. Vercel reads the two service definitions from `vercel.json`.
-3. Configure the database and authentication variables from `.env.example`:
-   - `DATABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-4. Optional runtime variables:
-   - `ENGINE_TOKEN` if the engine is deployed on a public alternate host. A private Vercel service binding does not require it.
-   - `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, `AI_BASE_URL` for optional LLM intent extraction.
-5. Deploy from `main`. GitHub integration automatically promotes successful production builds.
+## Database initialization
 
-The official page allows up to 240 seconds for CP-SAT cold start, solving and validation. The current official baseline normally completes inside that limit.
+Create an empty database dedicated to TESSRA CIT. Apply one of these equivalent schema paths:
+
+```bash
+psql "$DATABASE_URL" -f supabase_schema_migration.sql
+```
+
+or run the committed Drizzle migrations `0000` through `0003` in order.
+
+The SQL chain contains 135 statements and creates 28 public tables. On the first application request, `ensureSeeded()` imports the operational CIT baseline if the `users` table is empty. It creates:
+
+- 27 rooms;
+- 40 source faculty plus source-derived requester profiles;
+- 14 student groups and 62 courses;
+- 189 offerings and 189 published timetable sessions;
+- 25 booking requests;
+- 41 examinations; and
+- one stored official baseline run.
+
+## Environment variables
+
+Configure values from `.env.example`:
+
+- `DATABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `ENGINE_URL`
+- optional `ENGINE_TOKEN`
+- optional `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, and `AI_BASE_URL`
+
+Keep database passwords, service-role keys, engine tokens, deploy keys, and Vercel tokens server-only. Never commit `.env.local`.
+
+## Vercel deployment
+
+1. Import `linkkunall-sys/TESSRA-CIT` as a **new** Vercel project.
+2. Keep the repository root as the project root.
+3. Allow `vercel.json` to create the web and engine services.
+4. Attach only the new CIT database and Supabase project.
+5. Add the environment variables above.
+6. Deploy from `main`.
+7. Confirm the private engine binding is available to the web service.
+
+If Vercel Services are unavailable, deploy `engine/` separately, protect it with `ENGINE_TOKEN`, and set `ENGINE_URL` to that service.
 
 ## Local development
-
-Prerequisites: Node.js 22+, Python 3.12+ and PostgreSQL.
 
 ```bash
 npm ci
 python3 -m pip install -r engine/requirements.txt pytest
-cp .env.example .env
+cp .env.example .env.local
 npm run dev
 ```
 
-Without `ENGINE_URL`, the Next.js application uses the local Python subprocess fallback. You can also run the engine directly:
+Without `ENGINE_URL`, the Next.js server uses the local Python subprocess fallback. The engine may also be run directly:
 
 ```bash
 cd engine
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-Then set `ENGINE_URL=http://localhost:8000` in the web environment.
-
-## Database initialization
-
-1. Set `DATABASE_URL` to a PostgreSQL database.
-2. Apply the Drizzle schema with `npx drizzle-kit push`.
-3. The first application boot seeds the compact role-workspace demo.
-4. The official CIT dataset remains the untouched JSON under `official/` and is loaded by the official pipeline.
-
 ## Post-deployment verification
 
 1. `GET /api/health` returns `{"ok":true}`.
-2. Sign in with every README demo account.
-3. As Admin, use **Reset demo data** and confirm 60/60 demo sessions regenerate.
-4. Open `/admin/official` and select **Generate schedule**.
-5. Confirm 189 timetable sessions, 41 exams and 0 hard violations.
-6. Download both the schedule and report.
-7. Independently run:
+2. Confirm first-request seeding completes without a partial import.
+3. Sign in with all four accounts in `access.md`.
+4. Check Admin, Coordinator, Faculty, and Club role boundaries.
+5. Use **Restore CIT baseline** and verify 189 sessions, 25 bookings, and 41 exams.
+6. Generate an official schedule from `/admin/official` and confirm 0 hard violations.
+7. Apply the supplied sample disruption, review the diff, approve it, and download both exports.
+8. Independently run the untouched organiser validator on the downloaded files.
+9. Exercise login/logout, access requests, password reset, export authorization, and mobile layouts.
+10. Rotate any temporary deployment credential used during setup.
 
-```bash
-python official/starterpack/CrunchWeek_StarterPack/validator.py \
-  --data official/starterpack/CrunchWeek_StarterPack/data/cit_public.json \
-  --schedule downloaded-schedule.json
-```
+## Delivery checklist
 
-## Submission checklist
-
-- [x] Public GitHub repository
-- [x] Live deployment
-- [x] Four working demo accounts in README
-- [x] Admin reset control
-- [x] App-produced `exports/schedule.json` and `exports/schedule_after.json`
-- [x] `AI_USAGE.md`, `THIRD_PARTY.md` and `.env.example`
-- [ ] Final walkthrough video link supplied by the submission owner
+- [x] Separate CIT repository
+- [x] CIT-only operational seed and identities
+- [x] Fresh-install SQL and Drizzle migrations
+- [x] Validator-clean baseline and disruption exports
+- [x] Automated tests, lint, typecheck, audit, and production build
+- [ ] Separate hosted CIT database
+- [ ] Separate CIT Vercel project
+- [ ] Authenticated browser/production smoke matrix
+- [ ] Final walkthrough video/link, if required by the submission owner

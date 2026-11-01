@@ -9,18 +9,24 @@ import type { RoomStatus, RoomType, SessionKind, VersionStats } from "@/db/schem
 import { DAY_COUNT, DAY_SHORT, LUNCH, PERIOD_COUNT } from "./constants";
 import { overlaps, toMinutes } from "./utils";
 
-export type EngineRoom = { id: number; code: string; type: RoomType; capacity: number; status: RoomStatus };
+export type EngineRoom = { id: number; code: string; type: RoomType; capacity: number; status: RoomStatus; allowedUses?: string[]; accessible?: boolean };
 export type EngineGroup = { id: number; code: string; size: number };
 export type EngineBlock = { facultyId: number; day: number; period: number };
+export type EngineRoomBlock = { roomId: number; day: number; period: number };
+export type EnginePreference = { facultyId: number; day: number; period: number; type: string };
 export type EngineOffering = {
   id: number;
   courseId: number;
   facultyId: number;
   groupIds: number[];
+  expectedSize?: number | null;
   sessionsPerWeek: number;
   duration: number;
   kind: SessionKind;
   roomType: RoomType;
+  allowedRoomIds?: number[];
+  sourceId?: string | null;
+  basketSlot?: string | null;
   label: string;
 };
 export type EngineSession = {
@@ -30,10 +36,14 @@ export type EngineSession = {
   facultyId: number;
   roomId: number;
   groupIds: number[];
+  expectedSize?: number | null;
   day: number;
   startPeriod: number;
   duration: number;
   kind: SessionKind;
+  sourceId?: string | null;
+  basketSlot?: string | null;
+  allowedRoomIds?: number[];
   isFixed: boolean;
 };
 export type Placement = { day: number; startPeriod: number; roomId: number };
@@ -45,7 +55,10 @@ export type IssueCode =
   | "capacity"
   | "room_type"
   | "faculty_unavailable"
+  | "faculty_daily_limit"
+  | "faculty_preference"
   | "room_unavailable"
+  | "basket_sync"
   | "spans_break"
   | "lab_start"
   | "out_of_bounds";
@@ -59,7 +72,10 @@ export const ISSUE_LABEL: Record<IssueCode, string> = {
   capacity: "Capacity exceeded",
   room_type: "Room type mismatch",
   faculty_unavailable: "Faculty unavailable",
+  faculty_daily_limit: "Faculty daily limit exceeded",
+  faculty_preference: "Faculty preference",
   room_unavailable: "Room unavailable",
+  basket_sync: "Elective basket out of sync",
   spans_break: "Spans lunch break",
   lab_start: "Invalid lab block",
   out_of_bounds: "Outside teaching hours",
@@ -76,6 +92,9 @@ export type EngineContext = {
   rooms: Map<number, EngineRoom>;
   groups: Map<number, EngineGroup>;
   blocks: EngineBlock[];
+  roomBlocks?: EngineRoomBlock[];
+  preferences?: EnginePreference[];
+  facultyDailyLimits?: Map<number, number>;
   labels: Labels;
 };
 
@@ -106,14 +125,21 @@ export function generateSchedule(input: {
   rooms: EngineRoom[];
   groups: EngineGroup[];
   blocks: EngineBlock[];
+  roomBlocks?: EngineRoomBlock[];
+  preferences?: EnginePreference[];
+  facultyDailyLimits?: Map<number, number>;
   fixed: EngineSession[];
 }): { sessions: EngineSession[]; stats: VersionStats } {
   const started = Date.now();
   const groupMap = new Map(input.groups.map((g) => [g.id, g]));
   const blocked = new Set(input.blocks.map((b) => key(b.facultyId, b.day, b.period)));
+  const blockedRooms = new Set((input.roomBlocks ?? []).map((b) => key(b.roomId, b.day, b.period)));
+  const avoided = new Set((input.preferences ?? []).filter((p) => p.type === "avoid").map((p) => key(p.facultyId, p.day, p.period)));
   const busyF = new Set<string>();
   const busyG = new Set<string>();
   const busyR = new Set<string>();
+  const groupBasket = new Map<string, string>();
+  const basketPlacement = new Map<string, { day: number; start: number; duration: number }>();
   const dayLoadG = new Map<string, number>();
   const dayLoadF = new Map<string, number>();
   const courseDay = new Set<string>();
@@ -124,7 +150,14 @@ export function generateSchedule(input: {
     for (let p = s.startPeriod; p < s.startPeriod + s.duration; p++) {
       busyF.add(key(s.facultyId, s.day, p));
       busyR.add(key(s.roomId, s.day, p));
-      for (const g of s.groupIds) busyG.add(key(g, s.day, p));
+      for (const g of s.groupIds) {
+        const groupKey = key(g, s.day, p);
+        busyG.add(groupKey);
+        if (s.basketSlot) groupBasket.set(groupKey, s.basketSlot);
+      }
+    }
+    if (s.basketSlot && !basketPlacement.has(s.basketSlot)) {
+      basketPlacement.set(s.basketSlot, { day: s.day, start: s.startPeriod, duration: s.duration });
     }
     for (const g of s.groupIds) {
       dayLoadG.set(`${g}:${s.day}`, (dayLoadG.get(`${g}:${s.day}`) ?? 0) + s.duration);
@@ -153,7 +186,7 @@ export function generateSchedule(input: {
   const units: Unit[] = [];
   for (const off of input.offerings) {
     const remaining = off.sessionsPerWeek - (fixedCount.get(off.id) ?? 0);
-    const size = groupSize(off.groupIds, groupMap);
+    const size = off.expectedSize ?? groupSize(off.groupIds, groupMap);
     for (let i = 0; i < remaining; i++) units.push({ off, size });
   }
   units.sort(
@@ -172,31 +205,45 @@ export function generateSchedule(input: {
     const { off } = u;
     requiredPeriods += off.duration;
     const types = compatibleRoomTypes(off.kind, off.roomType);
-    const candidateRooms = activeRooms.filter((r) => types.includes(r.type) && r.capacity >= u.size);
+    const candidateRooms = activeRooms.filter(
+      (r) => types.includes(r.type) && r.capacity >= u.size && (!off.allowedRoomIds?.length || off.allowedRoomIds.includes(r.id)),
+    );
     type Best = { score: number; day: number; start: number; roomId: number };
     const holder: { best: Best | null } = { best: null };
 
     for (const strict of [true, false]) {
       for (let day = 0; day < DAY_COUNT; day++) {
+        const synchronized = off.basketSlot ? basketPlacement.get(off.basketSlot) : undefined;
+        if (synchronized && (day !== synchronized.day || off.duration !== synchronized.duration)) continue;
+        const facultyLimit = input.facultyDailyLimits?.get(off.facultyId);
+        if (facultyLimit && (dayLoadF.get(`${off.facultyId}:${day}`) ?? 0) + off.duration > facultyLimit) continue;
         if (strict && off.groupIds.some((g) => courseDay.has(`${off.courseId}:${g}:${day}`))) continue;
         for (let start = 1; start + off.duration - 1 <= PERIOD_COUNT; start++) {
+          if (synchronized && start !== synchronized.start) continue;
           // Three-hour labs use the official P2–P4 or P6–P8 blocks.
           if (off.kind === "lab" && start !== 2 && start !== 6) continue;
           if (spansBreak(start, off.duration)) continue;
           let free = true;
           for (let p = start; p < start + off.duration && free; p++) {
             if (busyF.has(key(off.facultyId, day, p)) || blocked.has(key(off.facultyId, day, p))) free = false;
-            for (const g of off.groupIds) if (busyG.has(key(g, day, p))) free = false;
+            for (const g of off.groupIds) {
+              const groupKey = key(g, day, p);
+              if (busyG.has(groupKey) && (!off.basketSlot || groupBasket.get(groupKey) !== off.basketSlot)) free = false;
+            }
           }
           if (!free) continue;
           const room = candidateRooms.find((r) => {
-            for (let p = start; p < start + off.duration; p++) if (busyR.has(key(r.id, day, p))) return false;
+            for (let p = start; p < start + off.duration; p++) {
+              if (busyR.has(key(r.id, day, p)) || blockedRooms.has(key(r.id, day, p))) return false;
+            }
             return true;
           });
           if (!room) continue;
           const gLoad = Math.max(0, ...off.groupIds.map((g) => dayLoadG.get(`${g}:${day}`) ?? 0));
           const fLoad = dayLoadF.get(`${off.facultyId}:${day}`) ?? 0;
-          const score = gLoad * 10 + fLoad * 4 + (PERIOD_PENALTY[start] ?? 0) + (room.capacity - u.size) / 60;
+          const preferencePenalty = Array.from({ length: off.duration }, (_, i) => start + i)
+            .filter((period) => avoided.has(key(off.facultyId, day, period))).length * 20;
+          const score = gLoad * 10 + fLoad * 4 + preferencePenalty + (PERIOD_PENALTY[start] ?? 0) + (room.capacity - u.size) / 60;
           if (!holder.best || score < holder.best.score) holder.best = { score, day, start, roomId: room.id };
         }
       }
@@ -212,10 +259,14 @@ export function generateSchedule(input: {
         facultyId: off.facultyId,
         roomId: best.roomId,
         groupIds: off.groupIds,
+        expectedSize: off.expectedSize,
         day: best.day,
         startPeriod: best.start,
         duration: off.duration,
         kind: off.kind,
+        sourceId: off.sourceId,
+        basketSlot: off.basketSlot,
+        allowedRoomIds: off.allowedRoomIds,
         isFixed: false,
       };
       occupy(s);
@@ -254,6 +305,8 @@ export function validateSessions(sessions: EngineSession[], ctx: EngineContext):
   const gMap = new Map<string, number[]>();
   const rMap = new Map<string, number[]>();
   const blocked = new Set(ctx.blocks.map((b) => key(b.facultyId, b.day, b.period)));
+  const blockedRooms = new Set((ctx.roomBlocks ?? []).map((b) => key(b.roomId, b.day, b.period)));
+  const avoided = new Set((ctx.preferences ?? []).filter((p) => p.type === "avoid").map((p) => key(p.facultyId, p.day, p.period)));
   const byId = new Map(sessions.map((s) => [s.id, s]));
   const push = (map: Map<string, number[]>, k: string, id: number) => {
     const list = map.get(k);
@@ -275,11 +328,16 @@ export function validateSessions(sessions: EngineSession[], ctx: EngineContext):
     }
     const room = ctx.rooms.get(s.roomId);
     if (room) {
-      const size = groupSize(s.groupIds, ctx.groups);
+      const size = s.expectedSize ?? groupSize(s.groupIds, ctx.groups);
       if (room.capacity < size) {
         issues.push({ code: "capacity", severity: "error", message: `${course} needs ${size} seats but ${room.code} holds ${room.capacity}`, sessionIds: [s.id] });
       }
-      if (s.kind === "lab" && room.type !== "lab") {
+      const requiredUse = s.kind === "lab" ? "lab" : s.kind === "tutorial" ? "tutorial" : "lecture";
+      if (s.allowedRoomIds?.length && !s.allowedRoomIds.includes(room.id)) {
+        issues.push({ code: "room_type", severity: "error", message: `${room.code} is not eligible for ${course} under its CIT room-type, capacity, or accessibility requirements`, sessionIds: [s.id] });
+      } else if (room.allowedUses?.length && !room.allowedUses.includes(requiredUse)) {
+        issues.push({ code: "room_type", severity: "error", message: `${room.code} is not approved for ${requiredUse} use`, sessionIds: [s.id] });
+      } else if (s.kind === "lab" && room.type !== "lab") {
         issues.push({ code: "room_type", severity: "error", message: `${course} is a lab but ${room.code} is not a laboratory`, sessionIds: [s.id] });
       }
       if (room.status !== "active") {
@@ -292,11 +350,15 @@ export function validateSessions(sessions: EngineSession[], ctx: EngineContext):
       }
     }
     let unavailable = false;
+    let roomUnavailable = false;
+    let preferenceMiss = false;
     for (let p = s.startPeriod; p < s.startPeriod + s.duration; p++) {
       push(fMap, key(s.facultyId, s.day, p), s.id);
       push(rMap, key(s.roomId, s.day, p), s.id);
       for (const g of s.groupIds) push(gMap, key(g, s.day, p), s.id);
       if (blocked.has(key(s.facultyId, s.day, p))) unavailable = true;
+      if (blockedRooms.has(key(s.roomId, s.day, p))) roomUnavailable = true;
+      if (avoided.has(key(s.facultyId, s.day, p))) preferenceMiss = true;
     }
     if (unavailable) {
       issues.push({
@@ -306,12 +368,60 @@ export function validateSessions(sessions: EngineSession[], ctx: EngineContext):
         sessionIds: [s.id],
       });
     }
+    if (preferenceMiss) {
+      issues.push({
+        code: "faculty_preference",
+        severity: "warning",
+        message: `${ctx.labels.faculty(s.facultyId)} prefers to avoid ${course} (${where})`,
+        sessionIds: [s.id],
+      });
+    }
+    if (roomUnavailable) {
+      issues.push({
+        code: "room_unavailable",
+        severity: "error",
+        message: `${ctx.labels.room(s.roomId)} is marked unavailable during ${course} (${where})`,
+        sessionIds: [s.id],
+      });
+    }
+  }
+
+  for (const [facultyId, limit] of ctx.facultyDailyLimits ?? []) {
+    for (let day = 0; day < DAY_COUNT; day++) {
+      const assigned = sessions.filter((session) => session.facultyId === facultyId && session.day === day);
+      const load = assigned.reduce((sum, session) => sum + session.duration, 0);
+      if (load > limit) {
+        issues.push({
+          code: "faculty_daily_limit",
+          severity: "error",
+          message: `${ctx.labels.faculty(facultyId)} has ${load} periods on ${DAY_SHORT[day]}, above the daily limit of ${limit}`,
+          sessionIds: assigned.map((session) => session.id),
+        });
+      }
+    }
+  }
+
+  const baskets = new Map<string, EngineSession[]>();
+  for (const session of sessions) {
+    if (!session.basketSlot) continue;
+    baskets.set(session.basketSlot, [...(baskets.get(session.basketSlot) ?? []), session]);
+  }
+  for (const [basket, members] of baskets) {
+    const placements = new Set(members.map((session) => `${session.day}:${session.startPeriod}:${session.duration}`));
+    if (placements.size > 1) {
+      issues.push({
+        code: "basket_sync",
+        severity: "error",
+        message: `Elective basket ${basket} must keep all choices in one synchronized slot`,
+        sessionIds: members.map((session) => session.id),
+      });
+    }
   }
 
   const seen = new Set<string>();
-  const clashes = (map: Map<string, number[]>, code: IssueCode, describe: (id: number) => string) => {
+  const clashes = (map: Map<string, number[]>, code: IssueCode, describe: (id: number) => string, allowed?: (ids: number[]) => boolean) => {
     for (const [k, ids] of map) {
-      if (ids.length < 2) continue;
+      if (ids.length < 2 || allowed?.(ids)) continue;
       const sig = `${code}:${[...ids].sort((a, b) => a - b).join(",")}`;
       if (seen.has(sig)) continue;
       seen.add(sig);
@@ -321,7 +431,15 @@ export function validateSessions(sessions: EngineSession[], ctx: EngineContext):
     }
   };
   clashes(fMap, "faculty_clash", (id) => ctx.labels.faculty(id));
-  clashes(gMap, "group_clash", (id) => ctx.labels.group(id));
+  clashes(
+    gMap,
+    "group_clash",
+    (id) => ctx.labels.group(id),
+    (ids) => {
+      const basketSlots = ids.map((id) => byId.get(id)?.basketSlot ?? null);
+      return Boolean(basketSlots[0] && basketSlots.every((slot) => slot === basketSlots[0]));
+    },
+  );
   clashes(rMap, "room_clash", (id) => ctx.labels.room(id));
   return issues;
 }
@@ -352,36 +470,56 @@ export function findAlternatives(
   const busyF = new Set<string>();
   const busyG = new Set<string>();
   const busyR = new Set<string>();
+  const groupBasket = new Map<string, string>();
   for (const s of others) {
     for (let p = s.startPeriod; p < s.startPeriod + s.duration; p++) {
       busyF.add(key(s.facultyId, s.day, p));
       busyR.add(key(s.roomId, s.day, p));
-      for (const g of s.groupIds) busyG.add(key(g, s.day, p));
+      for (const g of s.groupIds) {
+        const groupKey = key(g, s.day, p);
+        busyG.add(groupKey);
+        if (s.basketSlot) groupBasket.set(groupKey, s.basketSlot);
+      }
     }
   }
   const blocked = new Set([...ctx.blocks, ...(opts.extraBlocks ?? [])].map((b) => key(b.facultyId, b.day, b.period)));
-  const size = groupSize(target.groupIds, ctx.groups);
+  const blockedRooms = new Set((ctx.roomBlocks ?? []).map((block) => key(block.roomId, block.day, block.period)));
+  const size = target.expectedSize ?? groupSize(target.groupIds, ctx.groups);
   const types: RoomType[] = target.kind === "lab" ? ["lab"] : ["lecture", "seminar", "auditorium"];
   const rooms = [...ctx.rooms.values()]
-    .filter((r) => r.status === "active" && types.includes(r.type) && r.capacity >= size && !(opts.excludeRoomIds ?? []).includes(r.id))
+    .filter((r) => r.status === "active" && types.includes(r.type) && r.capacity >= size && (!target.allowedRoomIds?.length || target.allowedRoomIds.includes(r.id)) && !(opts.excludeRoomIds ?? []).includes(r.id))
     .sort((a, b) => a.capacity - b.capacity);
 
+  const dailyFacultyLoad = new Map<number, number>();
+  for (const session of others.filter((session) => session.facultyId === target.facultyId)) {
+    dailyFacultyLoad.set(session.day, (dailyFacultyLoad.get(session.day) ?? 0) + session.duration);
+  }
+  const synchronizedPeer = target.basketSlot ? others.find((session) => session.basketSlot === target.basketSlot) : undefined;
   const results: (Placement & { score: number })[] = [];
   for (let day = 0; day < DAY_COUNT; day++) {
     if (opts.onlyDay !== undefined && day !== opts.onlyDay) continue;
     if (opts.avoidDays?.includes(day)) continue;
+    if (synchronizedPeer && day !== synchronizedPeer.day) continue;
+    const dailyLimit = ctx.facultyDailyLimits?.get(target.facultyId);
+    if (dailyLimit && (dailyFacultyLoad.get(day) ?? 0) + target.duration > dailyLimit) continue;
     for (let start = 1; start + target.duration - 1 <= PERIOD_COUNT; start++) {
       if (opts.keepSlot && (day !== target.day || start !== target.startPeriod)) continue;
+      if (synchronizedPeer && (start !== synchronizedPeer.startPeriod || target.duration !== synchronizedPeer.duration)) continue;
       if (target.kind === "lab" && start !== 2 && start !== 6) continue;
       if (spansBreak(start, target.duration)) continue;
       let free = true;
       for (let p = start; p < start + target.duration && free; p++) {
         if (busyF.has(key(target.facultyId, day, p)) || blocked.has(key(target.facultyId, day, p))) free = false;
-        for (const g of target.groupIds) if (busyG.has(key(g, day, p))) free = false;
+        for (const g of target.groupIds) {
+          const groupKey = key(g, day, p);
+          if (busyG.has(groupKey) && (!target.basketSlot || groupBasket.get(groupKey) !== target.basketSlot)) free = false;
+        }
       }
       if (!free) continue;
       const fits = rooms.filter((r) => {
-        for (let p = start; p < start + target.duration; p++) if (busyR.has(key(r.id, day, p))) return false;
+        for (let p = start; p < start + target.duration; p++) {
+          if (busyR.has(key(r.id, day, p)) || blockedRooms.has(key(r.id, day, p))) return false;
+        }
         return true;
       });
       if (!fits.length) continue;
@@ -413,6 +551,7 @@ export type ExamLike = {
   startTime: string;
   endTime: string;
   roomId: number;
+  roomIds?: number[];
   invigilatorId: number | null;
   candidates: number;
 };
@@ -420,10 +559,16 @@ export type ExamLike = {
 export function validateExams(examList: ExamLike[], ctx: { rooms: Map<number, EngineRoom>; labels: Labels }) {
   const result = new Map<number, string[]>();
   const add = (id: number, msg: string) => result.set(id, [...(result.get(id) ?? []), msg]);
+  const roomIds = (exam: ExamLike) => exam.roomIds?.length ? exam.roomIds : [exam.roomId];
   for (const e of examList) {
-    const room = ctx.rooms.get(e.roomId);
-    if (room && e.candidates > room.capacity) add(e.id, `${e.candidates} candidates exceed ${room.code} capacity (${room.capacity})`);
-    if (room && room.status !== "active") add(e.id, `${room.code} is ${room.status === "maintenance" ? "under maintenance" : "inactive"}`);
+    const assigned = roomIds(e).map((id) => ctx.rooms.get(id)).filter((room): room is EngineRoom => Boolean(room));
+    const effectiveCapacity = assigned.reduce((sum, room) => sum + Math.floor(room.capacity / 2), 0);
+    if (assigned.length && e.candidates > effectiveCapacity) {
+      add(e.id, `${e.candidates} candidates exceed half-capacity seating across ${assigned.map((room) => room.code).join(" + ")} (${effectiveCapacity})`);
+    }
+    for (const room of assigned) {
+      if (room.status !== "active") add(e.id, `${room.code} is ${room.status === "maintenance" ? "under maintenance" : "inactive"}`);
+    }
     if (toMinutes(e.endTime) <= toMinutes(e.startTime)) add(e.id, "End time must be after start time");
   }
   for (let i = 0; i < examList.length; i++) {
@@ -434,9 +579,11 @@ export function validateExams(examList: ExamLike[], ctx: { rooms: Map<number, En
       if (!overlaps(toMinutes(a.startTime), toMinutes(a.endTime), toMinutes(b.startTime), toMinutes(b.endTime))) continue;
       const ca = ctx.labels.course(a.courseId);
       const cb = ctx.labels.course(b.courseId);
-      if (a.roomId === b.roomId) {
-        add(a.id, `Room clash with ${cb} in ${ctx.labels.room(a.roomId)}`);
-        add(b.id, `Room clash with ${ca} in ${ctx.labels.room(b.roomId)}`);
+      const sharedRooms = roomIds(a).filter((id) => roomIds(b).includes(id));
+      if (sharedRooms.length) {
+        const names = sharedRooms.map(ctx.labels.room).join(", ");
+        add(a.id, `Room clash with ${cb} in ${names}`);
+        add(b.id, `Room clash with ${ca} in ${names}`);
       }
       const shared = a.groupIds.filter((g) => b.groupIds.includes(g));
       if (shared.length) {

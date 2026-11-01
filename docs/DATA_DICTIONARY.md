@@ -51,7 +51,9 @@ Basket semantics: all sessions sharing `basket_slot` (OEB-1/2/3) run at the same
 
 ## 3. Application database (PostgreSQL via Drizzle, `src/db/schema.ts`)
 
-Demo workspaces: `settings, departments, clubs, users, auth_sessions, rooms, student_groups, courses, offerings, schedule_versions, scheduled_sessions, availability_blocks, change_requests, bookings, exams, disruptions, notifications, audit_logs, assistant_messages`.
+Operational tables: `settings, departments, clubs, users, auth_sessions, rooms, student_groups, courses, offerings, schedule_versions, scheduled_sessions, availability_blocks, faculty_preferences, room_availability_blocks, change_requests, bookings, exams, disruptions, notifications, audit_logs, assistant_messages, syllabus_units, assignments, course_resources, access_requests, booking_priorities, password_reset_tokens`.
+
+CIT source fidelity is carried by `source_id` fields plus source-specific columns: room source type/allowed uses; user daily limits/accessibility; group accessibility; course year/contact structure; offering expected size/eligible rooms/basket/accessibility; booking source requester/role/windows/raw text; and exam course/room arrays plus abstract source day/session. Authentication email addresses and ISO operational dates are explicit adapters where the starter pack has no corresponding field.
 
 Official pipeline: **`official_runs`**
 | Column | Type | Meaning |

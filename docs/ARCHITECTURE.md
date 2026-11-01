@@ -1,53 +1,70 @@
-# TESSRA — Architecture
+# TESSRA CIT — Architecture
 
-```
-┌────────────────────────── Next.js (App Router, TypeScript strict) ─────────────────────────┐
-│  4 role workspaces (Admin / Coordinator / Faculty / Club) + /admin/official                │
-│  Server Components read via typed query layer (src/lib/queries.ts)                         │
-│  Mutations: Server Actions + Route Handlers, Zod-style server validation, role guards      │
-│  Auth: HttpOnly session cookie (SameSite=None; Secure; Partitioned on HTTPS)               │
-└──────────────┬──────────────────────────────────────────────┬─────────────────────────────┘
-               │ Drizzle ORM                                  │ official pipeline
-        PostgreSQL (Supabase-ready)                    src/lib/official.ts
-        demo workspace tables + official_runs                 │
-                                                ┌─────────────┴────────────────────┐
-                                                │ Production: private Vercel binding │
-                                                │ ENGINE_URL → /solve-validated      │
-                                                │ Local fallback: python3 solve.py   │
-                                                └─────────────┬────────────────────┘
-                                                              │
-                                          engine/core.py — OR-Tools CP-SAT
-                                          hard H1–H14 · soft S1–S6 (official weights)
-                                          bookings (priority/caps/windows/overrides)
-                                          exams (AM/PM, half capacity) · repairs
-                                                              │
-                                          byte-identical official validator copy
-                                          report stored verbatim in official_runs
+## System shape
+
+```text
+Next.js App Router (TypeScript strict)
+├─ Admin / Coordinator / Faculty / Club role workspaces
+├─ Server Components + typed query layer
+├─ Server Actions and route handlers with server-side role guards
+├─ Local HttpOnly sessions, with optional linked Supabase Auth
+├─ PostgreSQL via Drizzle ORM
+│  ├─ CIT operational reference data
+│  ├─ versioned timetable and constraints
+│  ├─ bookings, examinations, approvals, coursework, and audit
+│  └─ official_runs JSON exports/reports
+└─ Official pipeline
+   ├─ local Python subprocess, or private ENGINE_URL service
+   ├─ OR-Tools CP-SAT solver (engine/core.py)
+   └─ byte-identical organiser validator
 ```
 
-## Layers
-- **UI**: `src/components` design system (tokens in `globals.css`), role shell, timetable grids.
-- **Application**: `src/app/**` pages + `src/lib/*-actions.ts` server actions; every action starts with `requireRole(...)`.
-- **Domain**: demo engine (`src/lib/engine.ts`, `scheduler.ts`) and official integration (`src/lib/official.ts`, `official-actions.ts`).
-- **Scheduling service**: `engine/` is standalone Python — CP-SAT model, deterministic booking/exam allocators, independent `check_assignment`, CLI + FastAPI. In production it is a private Vercel Python Service bound to the web service; it never touches the app database and receives only the submitted dataset/baseline/change data.
-- **Validation authority**: the organisers' `validator.py`. The isolated deployment contains a byte-identical copy, enforced by regression test; `/solve-validated` returns its report with the schedule. The app stores and displays that report verbatim, and a run with violations is shown as invalid rather than hidden.
+## Application layers
 
-## Security model (current)
-- Session cookies: random 256-bit tokens in `auth_sessions`, HttpOnly; over HTTPS `SameSite=None; Secure; Partitioned` so embedded previews work; cookie-probe endpoint detects blocked storage before sign-in.
-- Authorization: server-side role checks on every page, action and export route; wrong role → redirect/403. Login route rejects cross-site posts (Sec-Fetch-Site/Origin).
-- No public registration; demo accounts seeded; admin-created accounts are the production path.
-- Secrets only via env (`DATABASE_URL`, `ENGINE_TOKEN`, future Supabase/AI keys). Nothing committed.
+- **UI:** `src/app` and `src/components`; responsive role shells, timetable views, forms, and dialogs.
+- **Application:** Server Actions and route handlers. Mutations start with `requireRole(...)` or `requireUser()` and revalidate affected views.
+- **Operational domain:** `src/lib/engine.ts`, `scheduler.ts`, `queries.ts`, and `actions.ts` operate directly on the imported CIT relational data.
+- **Source import:** `src/lib/seed.ts` imports the canonical starter pack and committed exports, and provides an atomic operational-baseline restore.
+- **Official domain:** `src/lib/official.ts`, `official-actions.ts`, and `official-disruption.ts` run the benchmark solve/validate/repair workflow without replacing the relational role product.
+- **Scheduling service:** `engine/` is a standalone CLI/FastAPI service. It receives only dataset/baseline/change payloads and never connects to the application database.
 
-## Supabase target (when keys are provided)
-- Move Postgres to Supabase; keep Drizzle for server access.
-- Supabase Auth (email+password, no public sign-up) replaces `auth_sessions`; `profiles` table maps `auth.uid()` → role/department/club.
-- RLS policies mirror the app guards: admin full; coordinator SELECT/UPDATE scoped to own department ids; faculty SELECT own timetable + own requests; club SELECT/INSERT own bookings; `audit_logs` INSERT-only for service role, no UPDATE/DELETE for anyone.
-- Service-role key server-only; browser uses anon key + RLS.
+## One CIT data world
 
-## Key decisions
-- Official priority, caps, cancellations and windows are read from the dataset — never hardcoded rankings.
-- Bookings are allocated in strict priority order, so priority inversions are structurally avoided (validator confirms 0).
-- Only institute events may displace classes, and every displaced session must pass `check_assignment` in its new slot before the override is emitted.
-- Repairs use two CP-SAT phases: first minimize and prove the baseline-move count; then constrain that count to its optimum and minimize S1–S6. This is lexicographic, not an approximate weighted penalty.
-- Uploaded change JSON is schema/reference-validated in the Next.js boundary before the private engine is called. All five organiser change types are supported.
-- A repair row carries namespaced internal workflow metadata (`proposed`, `approved`, or `rejected`) inside its stored validator report. Export strips that metadata; proposal/rejection exports return HTTP 409, so only a separately approved Admin action can publish `schedule_after.json`.
+The former compact demonstration fixtures are not seeded. The role workspaces use the supplied CIT source records:
+
+- source IDs are retained on users, rooms, groups, courses, offerings, bookings, exams, and scheduled sessions;
+- each source offering stores expected attendance, basket metadata, accessibility, and its exact eligible room IDs;
+- faculty daily limits, hard blocks, soft preferences, and room blocks flow into generation, validation, manual moves, and disruption alternatives;
+- source booking requester name and role are retained independently of the authentication profile used to operate the request;
+- multi-course and multi-room examinations remain intact.
+
+The official workbench uses the same canonical JSON but remains a reproducible CP-SAT/organiser-validator boundary.
+
+## Database lifecycle
+
+`ensureSeeded()` uses transaction-scoped PostgreSQL advisory locking for concurrent first requests. A missing schema is bootstrapped from the committed migration chain; an empty `users` table is populated transactionally. Existing populated databases are never silently overwritten.
+
+The Admin baseline restore is also transactional. It preserves user identities, hosted-auth links, and active auth sessions while replacing mutable workflows, timetable versions, source constraints, bookings, examinations, and official runs. Any missing source reference rolls back the whole restore.
+
+## Security model
+
+- Random session tokens are stored in `auth_sessions`; cookies are HttpOnly and use secure cross-site attributes on HTTPS.
+- Every protected page, mutation, and export performs a server-side role check.
+- Login rejects cross-site POSTs; inputs are parsed and validated at the server boundary.
+- LLM output can propose intent only. Deterministic scheduling and booking checks remain authoritative.
+- Secrets are read only from environment variables; no database, Supabase, engine, GitHub, or deployment credential belongs in the repository.
+- Supabase service-role access is server-only. When hosted Auth is configured, only the four published sign-in identities are created automatically; the remaining source faculty stay operational profiles.
+
+## Official repair lifecycle
+
+1. Validate uploaded disruption JSON, including nested shapes and source references.
+2. Run CP-SAT phase one to minimize and prove the baseline movement count.
+3. Fix that minimum and optimize official S1–S6 penalties.
+4. Run the untouched organiser validator.
+5. Store the proposal and exact diff in `official_runs`.
+6. Require a separate Admin approval or rejection.
+7. Block proposal/rejected exports; strip internal workflow metadata from approved downloads.
+
+## Deployment boundary
+
+The intended hosted topology is a new CIT-only PostgreSQL/Supabase project plus a new Vercel web/engine project. No hosted CIT infrastructure is configured in the source-delivery phase; see `docs/DEPLOYMENT.md`.

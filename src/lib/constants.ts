@@ -12,11 +12,11 @@ import type {
 export type { ChangeType, DisruptionType, Priority, RequestStatus, Role, RoomStatus, RoomType, SessionKind };
 
 export const PRODUCT = {
-  name: "TESSRA",
-  descriptor: "Intelligent Campus ERP",
-  tagline: "Smarter Schedules. Seamless Campus Operations.",
+  name: "TESSRA CIT",
+  descriptor: "Chilika Institute of Technology",
+  tagline: "One CIT workspace for schedules, resources, bookings, and decisions.",
   summary:
-    "A unified platform that brings academic scheduling, campus resources, venue bookings, and operational decisions into one intelligent workspace.",
+    "The directly editable campus operations workspace for Chilika Institute of Technology, powered exclusively by the CIT CrunchWeek dataset.",
 };
 
 /** Institute calendar dates are interpreted in Indian Standard Time, including on UTC serverless hosts. */
@@ -116,46 +116,64 @@ export const DISRUPTION_TYPE_LABEL: Record<DisruptionType, string> = {
 };
 
 export const BOOKING_CATEGORIES: { value: string; label: string }[] = [
-  { value: "club_event", label: "Club event" },
+  { value: "exam", label: "Examination" },
+  { value: "institute_event", label: "Institute event" },
+  { value: "guest_lecture", label: "Guest lecture" },
   { value: "department_event", label: "Department event" },
-  { value: "workshop", label: "Workshop" },
-  { value: "seminar", label: "Seminar / guest lecture" },
-  { value: "meeting", label: "Meeting" },
-  { value: "cultural", label: "Cultural programme" },
-  { value: "sports", label: "Sports & recreation" },
+  { value: "club_event", label: "Club event" },
+  { value: "regular_class", label: "Regular class" },
 ];
 
 export function categoryLabel(value: string) {
   return BOOKING_CATEGORIES.find((c) => c.value === value)?.label ?? value;
 }
 
-export const ROOM_FEATURES = [
-  "Projector",
-  "Smart board",
-  "Audio system",
-  "Air conditioning",
-  "Wi-Fi",
-  "Lab workstations",
-  "Lecture capture",
-  "Stage lighting",
-];
+export const ROOM_FEATURES = ["projector", "pa_system", "stage", "ac", "computers", "power_benches"];
 
 export const BOOKING_NEEDS = [
   "Projector",
   "Audio system",
   "Microphones",
   "Stage lighting",
+  "Air conditioning",
   "Recording",
   "Wi-Fi access",
   "Lab workstations",
+  "Power benches",
   "Accessibility",
 ];
+
+/** Match human-facing request labels to both CIT source feature codes and manually entered legacy labels. */
+export function roomSupportsBookingNeed(features: string[], accessible: boolean, need: string) {
+  const available = new Set(features.map((feature) => feature.toLowerCase().replace(/[ -]+/g, "_")));
+  switch (need) {
+    case "Accessibility":
+      return accessible;
+    case "Audio system":
+    case "Microphones":
+      return available.has("pa_system") || available.has("audio_system");
+    case "Stage lighting":
+      return available.has("stage") || available.has("stage_lighting");
+    case "Air conditioning":
+      return available.has("ac") || available.has("air_conditioning");
+    case "Recording":
+      return available.has("recording") || available.has("lecture_capture");
+    case "Wi-Fi access":
+      return available.has("wi_fi") || available.has("wifi");
+    case "Lab workstations":
+      return available.has("computers") || available.has("lab_workstations");
+    case "Power benches":
+      return available.has("power_benches");
+    default:
+      return available.has(need.toLowerCase().replace(/[ -]+/g, "_"));
+  }
+}
 
 export const DEMO_PASSWORD = "tessra123";
 
 export const DEMO_ACCOUNTS: { role: Role; email: string; name: string; detail: string }[] = [
-  { role: "admin", email: "admin@westbrook.edu", name: "Aditi Kapoor", detail: "Academic Operations" },
-  { role: "coordinator", email: "coordinator.cse@westbrook.edu", name: "Dr. Meera Iyer", detail: "Computer Science & Engineering" },
-  { role: "faculty", email: "ananya.rao@westbrook.edu", name: "Dr. Ananya Rao", detail: "Associate Professor · CSE" },
-  { role: "club", email: "robotics@westbrook.edu", name: "Kabir Malhotra", detail: "Robotics Society" },
+  { role: "admin", email: "spectra.core.team@cit.ac.in", name: "Spectra Core Team", detail: "Institute event administration" },
+  { role: "coordinator", email: "ece.department@cit.ac.in", name: "ECE Department", detail: "Department coordination" },
+  { role: "faculty", email: "f01@cit.ac.in", name: "Dr. Ananya Mishra", detail: "Faculty · CSE" },
+  { role: "club", email: "coding.club@cit.ac.in", name: "Coding Club", detail: "Club representative" },
 ];

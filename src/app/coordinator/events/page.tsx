@@ -18,7 +18,7 @@ export default async function CoordinatorEventsPage() {
   const upcoming = bookings.filter((b) => b.date >= today && b.status !== "cancelled" && b.status !== "rejected").sort((a, b) => a.date.localeCompare(b.date));
   const past = bookings.filter((b) => !upcoming.includes(b));
   const venues = ref.rooms
-    .filter((r) => ["lecture", "seminar", "auditorium", "outdoor"].includes(r.type))
+    .filter((room) => room.bookable || room.allowedUses.includes("event"))
     .map((r) => ({ id: r.id, code: r.code, name: r.name, capacity: r.capacity, type: r.type, building: r.building, status: r.status }));
 
   const request = (

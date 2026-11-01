@@ -50,6 +50,7 @@ function describe(s: SessionView, issues?: string[]) {
     s.groupCodes.join(" and "),
     s.isFixed ? "fixed session" : "",
     s.combined ? "combined session" : "",
+    s.basketSlot ? `elective basket ${s.basketSlot}` : "",
     issues?.length ? `conflict: ${issues.join("; ")}` : "",
   ]
     .filter(Boolean)
@@ -106,9 +107,10 @@ function SessionCard({
           </p>
         )}
       </div>
-      {(s.duration > 1 || conflict || s.isFixed) && (
+      {(s.duration > 1 || conflict || s.isFixed || s.basketSlot) && (
         <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
           {s.duration > 1 && <span className="rounded bg-surface/85 px-1 text-[10px] font-medium text-ink-2 ring-1 ring-line">{s.duration} periods</span>}
+          {s.basketSlot && <span className="rounded bg-info-bg px-1 text-[10px] font-medium text-info-fg">{s.basketSlot}</span>}
           {s.isFixed && !compact && <span className="rounded bg-surface/85 px-1 text-[10px] font-medium text-ink-2 ring-1 ring-line">Fixed</span>}
           {conflict && <span className="rounded bg-danger-bg px-1 text-[10px] font-semibold text-danger-fg" title={issues?.join("\n")}>Conflict</span>}
         </div>

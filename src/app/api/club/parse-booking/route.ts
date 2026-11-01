@@ -3,6 +3,7 @@ import * as t from "@/db/schema";
 import type { RoomRow } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { parsePlainLanguageBooking } from "@/lib/booking-parser";
+import { roomSupportsBookingNeed } from "@/lib/constants";
 import { buildBookingAnalyzer } from "@/lib/engine";
 import { getSettings } from "@/lib/queries";
 import { addDaysIso, parseIso, todayIso, toMinutes } from "@/lib/utils";
@@ -18,21 +19,7 @@ function normalizedCode(value: string) {
 
 function supportsNeeds(room: RoomRow, needs: string[], accessible: boolean) {
   if (accessible && !room.accessible) return false;
-  const features = new Set(room.features.map((f) => f.toLowerCase()));
-  return needs.every((need) => {
-    switch (need) {
-      case "Accessibility":
-        return room.accessible;
-      case "Microphones":
-        return features.has("audio system");
-      case "Wi-Fi access":
-        return features.has("wi-fi");
-      case "Recording":
-        return features.has("recording") || features.has("lecture capture");
-      default:
-        return features.has(need.toLowerCase());
-    }
-  });
+  return needs.every((need) => roomSupportsBookingNeed(room.features, room.accessible, need));
 }
 
 function roomProblem(room: RoomRow, attendees: number | null, needs: string[], accessible: boolean) {
@@ -67,10 +54,7 @@ export async function POST(req: Request) {
   const mode = user.role === "club" ? "club" : "department";
   const draft = parsePlainLanguageBooking({ text, today, minDate, maxHours: settings.maxBookingHours, mode });
 
-  const eligible = rooms.filter((room) => {
-    if (user.role === "club") return room.bookable || room.type === "lab";
-    return ["lecture", "seminar", "auditorium", "outdoor"].includes(room.type);
-  });
+  const eligible = rooms.filter((room) => room.bookable || room.allowedUses.includes("event"));
   const warnings: string[] = [...draft.policyNotices];
   const followUp = [...draft.followUp];
   if (draft.date && !settings.allowWeekendBookings && [0, 6].includes(parseIso(draft.date).getDay())) {

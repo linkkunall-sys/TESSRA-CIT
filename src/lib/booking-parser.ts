@@ -475,16 +475,18 @@ function parseNeeds(text: string) {
     add("Audio system");
   }
   if (wanted("stage|stage\\s+lights?|lighting")) add("Stage lighting");
+  if (wanted("air[ -]?condition(?:ing|ed)|a\\.?c\\.?")) add("Air conditioning");
   if (wanted("recording|record|camera")) add("Recording");
   if (wanted("wi[ -]?fi|internet")) add("Wi-Fi access");
   if (wanted("computers?|workstations?|coding\\s+lab")) add("Lab workstations");
+  if (wanted("power\\s+benches?")) add("Power benches");
   if (wanted("accessible|wheelchair|wheel\\s+chair|ramp|barrier[- ]free")) add("Accessibility");
   return needs;
 }
 
 function parseRoom(text: string) {
   const lower = text.toLowerCase();
-  // Match the official CIT and demo-campus room-code families without treating
+  // Match the official CIT and general room-code families without treating
   // student-group identifiers such as ECE-3/CSE-3 as room requests.
   const explicitCode = text.match(
     /\b(?:AUD|OAT|EXH-[NS]|SH-\d+|LHC?-\d+|LT-?\d+|CR-\d+|(?:CS|ELEC)-LAB-\d+|(?:PHY|CIVIL)-LAB|MECH-WS|[ABL]-\d{2,3})\b/i,

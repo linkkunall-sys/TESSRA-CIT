@@ -68,8 +68,8 @@ function Fields({ venues, defaults = {}, mode, minDate, leadDays, maxHours }: Om
   const selected = venues.find((v) => String(v.id) === roomId);
   const suggestions = state && !state.ok ? state.suggestions ?? [] : [];
   const over = selected && attendees !== "" && Number(attendees) > selected.capacity;
-  const categories = BOOKING_CATEGORIES.filter((c) =>
-    mode === "club" ? c.value !== "department_event" : c.value !== "club_event" && c.value !== "sports" && c.value !== "cultural",
+  const categories = BOOKING_CATEGORIES.filter((category) =>
+    category.value === (mode === "club" ? "club_event" : "department_event"),
   );
 
   const parseRequest = async () => {

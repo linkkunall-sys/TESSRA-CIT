@@ -10,21 +10,26 @@ import { formatDate, formatDateLong, pct, plural, relativeDay } from "@/lib/util
 export const metadata: Metadata = { title: "Examinations" };
 
 function ExamFields({ data: ref, exam }: { data: Ref; exam?: ExamView }) {
-  const examRooms = ref.rooms.filter((r) => ["exam_hall", "lecture", "auditorium"].includes(r.type));
+  const examRooms = ref.rooms.filter((room) => room.allowedUses.includes("exam"));
+  const selectedRoomIds = exam ? (exam.roomIds.length ? exam.roomIds : [exam.roomId]) : [];
   return (
     <ActionForm action={saveExamAction} className="grid gap-4 sm:grid-cols-2">
       {exam && <input type="hidden" name="id" value={exam.id} />}
-      <FormField name="courseId" label="Course" required className="sm:col-span-2">
-        <Select id="courseId" name="courseId" defaultValue={exam?.courseId ?? ""}>
-          <option value="">Select…</option>
+      <FormField name="courseIds" label="Courses" required className="sm:col-span-2" htmlFor="exam-course-0" hint="Select every course represented by this examination.">
+        <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
           {ref.courses
             .filter((c) => c.kind !== "lab")
-            .map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.code} · {c.title}
-              </option>
-            ))}
-        </Select>
+            .map((c, i) => {
+              const selected = exam ? (exam.courseIds.length ? exam.courseIds : [exam.courseId]) : [];
+              return (
+                <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-[13px] has-[:checked]:border-brand-300 has-[:checked]:bg-brand-50">
+                  <input id={`exam-course-${i}`} type="checkbox" name="courseIds" value={c.id} defaultChecked={selected.includes(c.id)} className="size-4 accent-brand-600" />
+                  <span className="font-medium text-ink">{c.code}</span>
+                  <span className="min-w-0 truncate text-xs text-ink-3">{c.title}</span>
+                </label>
+              );
+            })}
+        </div>
       </FormField>
       <FormField name="groupIds" label="Groups sitting the exam" required className="sm:col-span-2" htmlFor="exam-group-0">
         <div className="grid gap-2 sm:grid-cols-3">
@@ -48,15 +53,16 @@ function ExamFields({ data: ref, exam }: { data: Ref; exam?: ExamView }) {
           <Input id="endTime" name="endTime" type="time" defaultValue={exam?.endTime ?? "12:00"} />
         </FormField>
       </div>
-      <FormField name="roomId" label="Room" required>
-        <Select id="roomId" name="roomId" defaultValue={exam?.roomId ?? ""}>
-          <option value="">Select…</option>
-          {examRooms.map((r) => (
-            <option key={r.id} value={r.id} disabled={r.status !== "active"}>
-              {r.code} · {r.capacity} seats{r.status !== "active" ? " (unavailable)" : ""}
-            </option>
+      <FormField name="roomIds" label="Rooms" required className="sm:col-span-2" htmlFor="exam-room-0" hint="Select one or more rooms. Exam capacity uses half of each room’s normal capacity.">
+        <div className="grid gap-2 sm:grid-cols-3">
+          {examRooms.map((r, i) => (
+            <label key={r.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-[13px] has-[:checked]:border-brand-300 has-[:checked]:bg-brand-50">
+              <input id={`exam-room-${i}`} type="checkbox" name="roomIds" value={r.id} defaultChecked={selectedRoomIds.includes(r.id)} disabled={r.status !== "active"} className="size-4 accent-brand-600" />
+              <span className="font-medium text-ink">{r.code}</span>
+              <span className="ml-auto text-xs text-ink-3">{Math.floor(r.capacity / 2)} exam seats</span>
+            </label>
           ))}
-        </Select>
+        </div>
       </FormField>
       <FormField name="invigilatorId" label="Invigilator">
         <Select id="invigilatorId" name="invigilatorId" defaultValue={exam?.invigilatorId ?? ""}>
@@ -121,7 +127,7 @@ export default async function ExaminationsPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Examinations" value={exams.length} icon={GraduationCap} />
         <StatCard label="Examination days" value={dates.length} icon={CalendarDays} hint={dates.length ? `${formatDate(dates[0])} – ${formatDate(dates[dates.length - 1])}` : "Nothing scheduled"} />
-        <StatCard label="Candidates" value={candidates} icon={Users} hint={`${new Set(exams.map((e) => e.roomId)).size} rooms in use`} />
+        <StatCard label="Candidates" value={candidates} icon={Users} hint={`${new Set(exams.flatMap((e) => e.roomIds.length ? e.roomIds : [e.roomId])).size} rooms in use`} />
         <StatCard
           label="Validation"
           value={withIssues.length ? plural(withIssues.length, "issue") : "Valid"}
@@ -183,6 +189,7 @@ export default async function ExaminationsPage() {
                         <TR key={e.id} className={e.issues.length ? "bg-danger-bg/20" : undefined}>
                           <TD className="tabular whitespace-nowrap font-medium">
                             {e.startTime}–{e.endTime}
+                            {e.sourceDay && e.sourceSession ? <span className="block text-[11px] font-normal text-ink-3">Source: {e.sourceDay} · {e.sourceSession}</span> : null}
                           </TD>
                           <TD>
                             <p className="font-semibold">{e.courseCode}</p>

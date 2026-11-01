@@ -24,7 +24,7 @@ export default async function DiscoverVenuesPage({ searchParams }: { searchParam
   const start = get("start") ?? "";
   const end = get("end") ?? "";
   const checking = isIsoDate(date) && isValidTime(start) && isValidTime(end) && toMinutes(end) > toMinutes(start);
-  const bookable = ref.rooms.filter((r) => r.bookable || r.type === "lab");
+  const bookable = ref.rooms.filter((room) => room.bookable || room.allowedUses.includes("event"));
   const types = [...new Set(bookable.map((r) => r.type))] as RoomType[];
   const venues = bookable.filter((r) => (!q || `${r.code} ${r.name} ${r.building} ${r.features.join(" ")}`.toLowerCase().includes(q)) && (!type || r.type === type) && r.capacity >= cap);
   const analyzer = checking ? await buildBookingAnalyzer() : null;

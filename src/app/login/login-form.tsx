@@ -147,7 +147,7 @@ function LoginForm({ action, onSignedIn }: { action: FormAction; onSignedIn: Sig
     <ActionForm action={action} onSuccess={onSignedIn} className="mt-8 space-y-4" toastOnSuccess={false} toastOnError={false} aria-label="Sign in">
       <FormAlert />
       <FormField name="email" label="Work email" required>
-        <Input id="email" name="email" type="email" autoComplete="email" placeholder="name@westbrook.edu" />
+        <Input id="email" name="email" type="email" autoComplete="email" placeholder="name@cit.ac.in" />
       </FormField>
       <FormField name="password" label="Password" required>
         <Input id="password" name="password" type="password" autoComplete="current-password" placeholder="••••••••" />

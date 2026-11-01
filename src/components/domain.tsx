@@ -227,6 +227,7 @@ export function BookingCard({
             <StatusBadge status={b.status} />
             <PriorityBadge priority={b.priority} />
             <Badge tone="outline">{categoryLabel(b.category)}</Badge>
+            {b.sourceId ? <Badge tone="info">{b.sourceId}</Badge> : null}
           </div>
           <h3 className="mt-2 text-[15px] font-semibold text-ink">{b.title}</h3>
           {b.description && <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-ink-2">{b.description}</p>}
@@ -280,7 +281,14 @@ export function BookingCard({
           ))}
         </div>
       )}
-      {b.status === "rejected" && b.rejectionReason && (
+      {b.officialReason && (
+        <div className="mt-4 rounded-lg bg-brand-50/60 px-3 py-2.5 text-[13px] text-brand-800 ring-1 ring-brand-100">
+          <p className="font-semibold">CIT allocation decision</p>
+          <p className="mt-0.5">{b.officialReason}</p>
+          {b.suggestedRoomCode ? <p className="mt-1 font-medium">Proposed venue: {b.suggestedRoomCode}</p> : null}
+        </div>
+      )}
+      {(b.status === "rejected" || b.status === "cancelled") && b.rejectionReason && (
         <div className="mt-4 rounded-lg border border-danger-bg-strong bg-danger-bg/40 px-3 py-2.5 text-[13px] text-danger-fg">
           <p className="font-semibold">Reason for rejection</p>
           <p className="mt-0.5">{b.rejectionReason}</p>

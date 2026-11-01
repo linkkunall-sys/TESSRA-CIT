@@ -1,0 +1,100 @@
+name: Deploy TESSRA CIT to Vercel
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DEPLOY-CIT-SEPARATE to confirm this uses a new CIT project and database"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tessra-cit-vercel-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Validate and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - name: Confirm isolated infrastructure
+        shell: bash
+        run: |
+          if [[ "${{ inputs.confirmation }}" != "DEPLOY-CIT-SEPARATE" ]]; then
+            echo "::error::Deployment stopped. Enter the exact isolation confirmation."
+            exit 1
+          fi
+
+          missing=()
+          for name in DATABASE_URL VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [[ -z "${!name}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing GitHub Actions secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run application checks
+        run: |
+          npm run test:unit
+          npm run typecheck
+          npm run lint
+          npm run build
+
+      - name: Link the dedicated Vercel project
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          fs.mkdirSync(".vercel", { recursive: true });
+          fs.writeFileSync(
+            ".vercel/project.json",
+            JSON.stringify({
+              orgId: process.env.VERCEL_ORG_ID,
+              projectId: process.env.VERCEL_PROJECT_ID,
+            }),
+          );
+          NODE
+
+      - name: Deploy production
+        id: deploy
+        shell: bash
+        run: |
+          deployment_url="$(npx --yes vercel@latest deploy \
+            --prod \
+            --yes \
+            --token "$VERCEL_TOKEN" \
+            --build-env DATABASE_URL="$DATABASE_URL" \
+            --env DATABASE_URL="$DATABASE_URL")"
+          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
+
+      - name: Publish deployment URL
+        shell: bash
+        run: |
+          echo "### TESSRA CIT production deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"

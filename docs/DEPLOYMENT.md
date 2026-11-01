@@ -61,12 +61,23 @@ Keep database passwords, service-role keys, engine tokens, deploy keys, and Verc
 1. Import `linkkunall-sys/TESSRA-CIT` as a **new** Vercel project.
 2. Keep the repository root as the project root.
 3. Allow `vercel.json` to create the web and engine services.
-4. Attach only the new CIT database and Supabase project.
+4. Attach only a new CIT database. Never reuse the frozen original project's database.
 5. Add the environment variables above.
 6. Deploy from `main`.
 7. Confirm the private engine binding is available to the web service.
 
 If Vercel Services are unavailable, deploy `engine/` separately, protect it with `ENGINE_TOKEN`, and set `ENGINE_URL` to that service.
+
+### Manual GitHub Actions deployment
+
+`.github/workflows/deploy-vercel.yml` is manual-only and does not deploy on push. Before it can run, configure these GitHub Actions secrets:
+
+- `VERCEL_TOKEN` — a newly rotated Vercel token
+- `VERCEL_ORG_ID` — the owner/team ID of the dedicated CIT project
+- `VERCEL_PROJECT_ID` — the dedicated CIT project ID
+- `DATABASE_URL` — a new CIT PostgreSQL database, **not the frozen original Supabase database**
+
+Run **Deploy TESSRA CIT to Vercel** from the repository Actions tab and enter the exact confirmation `DEPLOY-CIT-SEPARATE`. The workflow refuses to continue if the confirmation or any required secret is missing. It runs unit tests, typecheck, lint, and a production build before deployment. It passes only `DATABASE_URL`; it does not read, configure, or modify Supabase credentials.
 
 ## Local development
 
